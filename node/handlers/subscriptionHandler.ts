@@ -5,7 +5,12 @@ import { readBody } from '../helpers/readBody'
 import { readRawBody } from '../helpers/readRawBody'
 import { readMdmConfig } from './devSettingsHandler'
 
-const VBASE_BUCKET = 'mdm-subscription'
+// Kept short deliberately — VBase prefixes bucket names with the app id and
+// caps the combined length at 50 chars. This app's id is long enough
+// ("chemtradeasia-mdm-seller") that a longer bucket name like
+// "mdm-subscription" silently 400s on every write (caught by the try/catch
+// below, so it never surfaces as an error unless you're looking for it).
+const VBASE_BUCKET = 'mdmsub'
 const VBASE_KEY = 'status'
 
 const DEFAULT_MONTHLY_USD = 25
@@ -28,7 +33,7 @@ interface SubscriptionRecord {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-const STRIPE_PRODUCTS_BUCKET = 'mdm-subscription'
+const STRIPE_PRODUCTS_BUCKET = VBASE_BUCKET
 const STRIPE_PRODUCTS_KEY = 'stripe-products'
 
 // Unlike Checkout Sessions, the Subscriptions API's inline price_data only
@@ -36,7 +41,11 @@ const STRIPE_PRODUCTS_KEY = 'stripe-products'
 // created once per plan and its id cached in VBase for reuse.
 async function getOrCreateProductId(ctx: ServiceContext<Clients>, stripe: Stripe, plan: Plan): Promise<string> {
   let cache: Record<string, string> = {}
-  try { cache = (await ctx.clients.vbase.getJSON<Record<string, string>>(STRIPE_PRODUCTS_BUCKET, STRIPE_PRODUCTS_KEY, true)) ?? {} } catch {}
+  try {
+    cache = (await ctx.clients.vbase.getJSON<Record<string, string>>(STRIPE_PRODUCTS_BUCKET, STRIPE_PRODUCTS_KEY, true)) ?? {}
+  } catch (err: any) {
+    console.error('[subscriptionHandler] failed to read cached Stripe product ids from VBase:', err?.message)
+  }
 
   if (cache[plan]) {
     try {
@@ -52,7 +61,11 @@ async function getOrCreateProductId(ctx: ServiceContext<Clients>, stripe: Stripe
     name: `Seller Marketplace Subscription — ${plan === 'yearly' ? 'Yearly' : 'Monthly'}`,
   })
   cache[plan] = product.id
-  try { await ctx.clients.vbase.saveJSON(STRIPE_PRODUCTS_BUCKET, STRIPE_PRODUCTS_KEY, cache) } catch {}
+  try {
+    await ctx.clients.vbase.saveJSON(STRIPE_PRODUCTS_BUCKET, STRIPE_PRODUCTS_KEY, cache)
+  } catch (err: any) {
+    console.error('[subscriptionHandler] failed to cache Stripe product id in VBase:', err?.message)
+  }
   return product.id
 }
 
@@ -312,9 +325,14 @@ export async function stripeWebhookHandler(ctx: ServiceContext<Clients>) {
       }
       await ctx.clients.vbase.saveJSON(VBASE_BUCKET, VBASE_KEY, record)
     }
-  } catch {
+  } catch (err: any) {
     // Persistence failures still ack 200 — Stripe retries on non-2xx and we
-    // don't want a VBase hiccup to trigger a retry storm.
+    // don't want a VBase hiccup to trigger a retry storm. Logged (rather than
+    // fully swallowed) so a bad bucket name or similar doesn't fail silently
+    // forever — see the VBASE_BUCKET comment above for the incident this
+    // caught (17-char bucket name + this app's long id = a 400 on every
+    // write, invisible until logged).
+    console.error(`[subscriptionHandler] webhook persistence failed for ${event.type}:`, err?.message)
   }
 
   ctx.body = { received: true }
