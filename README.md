@@ -30,6 +30,7 @@ For seller-facing instructions (not technical), see the **[User Guide](user-guid
 - [Managing Documents](user-guide/documents.md)
 - [Subscription & Billing](user-guide/subscription.md)
 - [FAQ / Troubleshooting](user-guide/faq.md)
+- [Dev Settings (list/add/update/remove config)](user-guide/dev-settings.md) — technical, for whoever configures/deploys the app
 
 ## Backend routes
 
@@ -66,7 +67,11 @@ All routes are defined in `node/service.json` and mounted at `https://{account}.
 
 | Method | Path | Handler | Purpose |
 |---|---|---|---|
-| `POST` | `/_v/mdm-seller/dev/settings` | `devSaveSettings` (`devSettingsHandler.ts`) | See [Settings](#settings) below |
+| `GET` | `/_v/mdm-seller/dev/settings?secret=...` | `devReadSettings` (`devSettingsHandler.ts`) | List current config (sensitive fields masked) |
+| `POST` | `/_v/mdm-seller/dev/settings` | `devSaveSettings` | Add/update config — merges into what's saved |
+| `DELETE` | `/_v/mdm-seller/dev/settings` | `devDeleteSettings` | Remove specific config keys |
+
+See [Settings](#settings) below and the full [Dev Settings guide](user-guide/dev-settings.md).
 
 ## MDM API
 
@@ -100,22 +105,7 @@ Defined in `manifest.json` → `settingsSchema`:
 
 **Production path:** VTEX Admin → Apps → this app → Settings, which VTEX persists and the app reads via `ctx.clients.apps.getAppSettings(appId)`.
 
-**Dev-only fallback (currently in use):** this seller edition has no Apps admin UI to reach that screen, and the app's own token can't write its own settings (`403`). `readMdmConfig()` (`node/handlers/devSettingsHandler.ts`) therefore falls back to a VBase-stored config when real settings are empty. To set it:
-
-```sh
-curl -X POST "https://{account}.myvtex.com/_v/mdm-seller/dev/settings" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "secret": "mdm-dev-2026",
-    "mdmApiEndpoint": "https://tradeasia.exchange/api/v1",
-    "mdmUsername": "...",
-    "mdmPassword": "...",
-    "stripeSecretKey": "sk_test_...",
-    "stripeWebhookSecret": "whsec_...",
-    "stripeMonthlyAmountUsd": "25",
-    "stripeYearlyAmountUsd": "250"
-  }'
-```
+**Dev-only fallback (currently in use):** this seller edition has no Apps admin UI to reach that screen, and the app's own token can't write its own settings (`403`). `readMdmConfig()` (`node/handlers/devSettingsHandler.ts`) therefore falls back to a VBase-stored config when real settings are empty, managed via `GET`/`POST`/`DELETE` on `/_v/mdm-seller/dev/settings` (list / add-or-update-by-merge / remove-by-key). Full reference with examples: **[Dev Settings guide](user-guide/dev-settings.md)**.
 
 ⚠️ The secret is hardcoded in source (`mdm-dev-2026`). Remove `devSettingsHandler.ts` and its route (`devSettings` in `service.json`) once real Settings access is available, before publishing to production.
 

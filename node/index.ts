@@ -2,7 +2,7 @@ import { Service, ServiceContext, ParamsContext, RecorderState, method } from '@
 import { Clients } from './clients'
 import { getSellerProducts, getSellerCountries } from './handlers/sellerProductsHandler'
 import { getSellerDocuments, uploadSellerDocument, deleteSellerDocument } from './handlers/sellerDocumentsHandler'
-import { devSaveSettings } from './handlers/devSettingsHandler'
+import { devReadSettings, devSaveSettings, devDeleteSettings } from './handlers/devSettingsHandler'
 import { catalogCapture, manualCapture, listMyProducts, captureEventLog } from './handlers/productCaptureHandler'
 import { createSubscriptionCheckout, stripeWebhookHandler, getSubscriptionStatus } from './handlers/subscriptionHandler'
 
@@ -32,7 +32,7 @@ export default new Service<Clients, State, ParamsContext>({
     sellerCountries: method({ GET: [getSellerCountries] }),
     sellerDocuments: method({ GET: [getSellerDocuments], POST: [uploadSellerDocument] }),
     sellerDocumentDelete: method({ POST: [deleteSellerDocument] }),
-    devSettings: method({ POST: [devSaveSettings] }),
+    devSettings: method({ GET: [devReadSettings], POST: [devSaveSettings], DELETE: [devDeleteSettings] }),
     manualCapture: method({ GET: [manualCapture] }),
     myProducts: method({ GET: [listMyProducts] }),
     captureEvents: method({ GET: [captureEventLog] }),
