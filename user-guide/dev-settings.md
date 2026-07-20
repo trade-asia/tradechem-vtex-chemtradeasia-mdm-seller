@@ -97,13 +97,18 @@ Removes just the listed keys; everything else stays as-is. Response:
 
 - **MDM credentials** (`mdmApiEndpoint`, `mdmUsername`, `mdmPassword`) — issued by whoever manages the ChemTradeAsia MDM system.
 - **`stripeSecretKey`** — Stripe Dashboard → Developers → API keys → "Secret key" (use a `sk_test_...` key while testing, switch to `sk_live_...` only when ready to take real payments).
+- **`stripePublishableKey`** — Stripe Dashboard → Developers → API keys → "Publishable key" (same page as the secret key). Only needed for the **Subscription (Embed)** page — the redirect-based Subscription page never loads Stripe.js client-side, so it works without this being set.
 - **`stripeWebhookSecret`** — Stripe Dashboard → Developers → Webhooks → **Add endpoint**, pointing at:
   ```
   https://{workspace}--{account}.myvtex.com/_v/mdm-seller/subscription/webhook
   ```
   Events to send: `checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`. Stripe shows a "Signing secret" once the endpoint is created — that's this value.
 
-There's no `stripePublishableKey` setting because this app doesn't need one — the Subscription page redirects to Stripe's own hosted Checkout page rather than embedding Stripe Elements, so only the secret key (server-side) is ever used.
+⚠️ Don't leave example/placeholder text (like `whsec_YOUR_SECRET_HERE`) saved in `stripeWebhookSecret` — run the **List** command above and check the masked tail doesn't end in obvious placeholder text. A fake value there fails signature verification the moment a real webhook call comes in, which is a confusing thing to debug after the fact.
+
+### Testing in Stripe Test mode
+
+If `stripeSecretKey`/`stripePublishableKey` are `sk_test_...`/`pk_test_...` (sandbox keys), no real card or money is involved. Use one of [Stripe's test cards](https://docs.stripe.com/testing) on either Subscription page — the simplest is `4242 4242 4242 4242`, any future expiry date, any 3-digit CVC, any postal code.
 
 ---
 
