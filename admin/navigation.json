@@ -1,0 +1,16 @@
+[
+  {
+    "section": "other",
+    "titleId": "mdm-seller.navigation.label",
+    "subSectionItems": [
+      {
+        "labelId": "mdm-seller.navigation.documents",
+        "path": "/admin/mdm-seller/documents"
+      },
+      {
+        "labelId": "mdm-seller.navigation.subscription",
+        "path": "/admin/mdm-seller/subscription"
+      }
+    ]
+  }
+]

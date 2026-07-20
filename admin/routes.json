@@ -1,0 +1,10 @@
+{
+  "admin.app.mdm-seller-documents": {
+    "component": "SellerDocuments",
+    "path": "/admin/app/mdm-seller/documents"
+  },
+  "admin.app.mdm-seller-subscription": {
+    "component": "SellerSubscription",
+    "path": "/admin/app/mdm-seller/subscription"
+  }
+}

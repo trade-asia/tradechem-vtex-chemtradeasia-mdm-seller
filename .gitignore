@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+**/node_modules/
+yarn-error.log
+npm-debug.log*
+
+# VTEX IO
+.vtex/
+dist/
+*.tgz
+
+# Env / secrets
+.env
+.env.*
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Logs
+*.log

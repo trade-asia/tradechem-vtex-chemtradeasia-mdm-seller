@@ -1,0 +1,43 @@
+import { Service, ServiceContext, ParamsContext, RecorderState, method } from '@vtex/api'
+import { Clients } from './clients'
+import { getSellerProducts, getSellerCountries } from './handlers/sellerProductsHandler'
+import { getSellerDocuments, uploadSellerDocument, deleteSellerDocument } from './handlers/sellerDocumentsHandler'
+import { devSaveSettings } from './handlers/devSettingsHandler'
+import { catalogCapture, manualCapture, listMyProducts, captureEventLog } from './handlers/productCaptureHandler'
+import { createSubscriptionCheckout, stripeWebhookHandler, getSubscriptionStatus } from './handlers/subscriptionHandler'
+
+declare global {
+  type Context = ServiceContext<Clients, State>
+
+  interface State extends RecorderState {
+    code: number
+  }
+}
+
+export default new Service<Clients, State, ParamsContext>({
+  clients: {
+    implementation: Clients,
+    options: {
+      default: {
+        retries: 2,
+        timeout: 10000,
+      },
+    },
+  },
+  events: {
+    catalogChange: [catalogCapture],
+  },
+  routes: {
+    sellerProducts: method({ GET: [getSellerProducts] }),
+    sellerCountries: method({ GET: [getSellerCountries] }),
+    sellerDocuments: method({ GET: [getSellerDocuments], POST: [uploadSellerDocument] }),
+    sellerDocumentDelete: method({ POST: [deleteSellerDocument] }),
+    devSettings: method({ POST: [devSaveSettings] }),
+    manualCapture: method({ GET: [manualCapture] }),
+    myProducts: method({ GET: [listMyProducts] }),
+    captureEvents: method({ GET: [captureEventLog] }),
+    subscriptionCheckout: method({ POST: [createSubscriptionCheckout] }),
+    subscriptionWebhook: method({ POST: [stripeWebhookHandler] }),
+    subscriptionStatus: method({ GET: [getSubscriptionStatus] }),
+  },
+})

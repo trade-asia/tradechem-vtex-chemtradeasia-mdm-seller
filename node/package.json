@@ -1,0 +1,16 @@
+{
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.15.0",
+    "stripe": "^17.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@vtex/api": "^7.0.0",
+    "typescript": "5.5.3"
+  },
+  "scripts": {
+    "lint": "tsc --noEmit --pretty"
+  },
+  "version": "0.0.1"
+}

@@ -1,0 +1,103 @@
+{
+  "vendor": "tradeasiab2b",
+  "name": "chemtradeasia-mdm-seller",
+  "version": "0.0.1",
+  "title": "MDM Seller",
+  "description": "Seller-facing MDM features: manage your own SDS / TDS / MSDS documents, with room for future MDM seller tools.",
+  "defaultLocale": "en-US",
+  "builders": {
+    "node": "7.x",
+    "react": "3.x",
+    "admin": "0.x",
+    "messages": "1.x"
+  },
+  "dependencies": {
+    "vtex.styleguide": "9.x",
+    "vtex.broadcaster": "0.x"
+  },
+  "billingOptions": {
+    "type": "free",
+    "availableCountries": [
+      "*"
+    ]
+  },
+  "policies": [
+    {
+      "name": "outbound-access",
+      "attrs": {
+        "host": "{{account}}.vtexcommercestable.com.br",
+        "path": "/api/*"
+      }
+    },
+    {
+      "name": "outbound-access",
+      "attrs": {
+        "host": "tradeasia.exchange",
+        "path": "/api/*"
+      }
+    },
+    {
+      "name": "vbase-read-write"
+    },
+    {
+      "name": "outbound-access",
+      "attrs": {
+        "host": "*",
+        "path": "*"
+      }
+    },
+    {
+      "name": "product-read"
+    }
+  ],
+  "settingsSchema": {
+    "title": "MDM Seller Settings",
+    "type": "object",
+    "properties": {
+      "mdmApiEndpoint": {
+        "title": "MDM API Endpoint",
+        "description": "Base URL of the MDM API (e.g. https://tradeasia.exchange/api/v1)",
+        "type": "string"
+      },
+      "mdmUsername": {
+        "title": "MDM Username",
+        "description": "TEMPORARY (dev only): admin login. Replace with a seller-scoped MDM token before production rollout — sellers can read these settings on their own account.",
+        "type": "string"
+      },
+      "mdmPassword": {
+        "title": "MDM Password",
+        "type": "string",
+        "widget": {
+          "ui:widget": "password"
+        }
+      },
+      "stripeSecretKey": {
+        "title": "Stripe Secret Key",
+        "description": "Server-side Stripe API secret key (sk_test_... or sk_live_...), used to create Checkout Sessions.",
+        "type": "string",
+        "widget": {
+          "ui:widget": "password"
+        }
+      },
+      "stripeWebhookSecret": {
+        "title": "Stripe Webhook Signing Secret",
+        "description": "Signing secret (whsec_...) for the Stripe webhook endpoint pointed at /_v/mdm-seller/subscription/webhook. Used to verify incoming events.",
+        "type": "string",
+        "widget": {
+          "ui:widget": "password"
+        }
+      },
+      "stripeMonthlyAmountUsd": {
+        "title": "Monthly Plan Price (USD)",
+        "description": "Amount charged per month for the Monthly subscription plan. Defaults to 25 if not set.",
+        "type": "string"
+      },
+      "stripeYearlyAmountUsd": {
+        "title": "Yearly Plan Price (USD)",
+        "description": "Amount charged per year for the Yearly subscription plan. Defaults to 250 if not set.",
+        "type": "string"
+      }
+    }
+  },
+  "$schema": "https://raw.githubusercontent.com/vtex/node-vtex-api/master/gen/manifest.schema"
+}

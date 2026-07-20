@@ -1,0 +1,61 @@
+{
+  "memory": 256,
+  "ttl": 10,
+  "timeout": 25,
+  "minReplicas": 2,
+  "maxReplicas": 4,
+  "workers": 2,
+  "routes": {
+    "sellerProducts": {
+      "path": "/_v/mdm-seller/products",
+      "public": true
+    },
+    "sellerCountries": {
+      "path": "/_v/mdm-seller/countries",
+      "public": true
+    },
+    "sellerDocuments": {
+      "path": "/_v/mdm-seller/documents",
+      "public": true
+    },
+    "sellerDocumentDelete": {
+      "path": "/_v/mdm-seller/documents/delete",
+      "public": true
+    },
+    "devSettings": {
+      "path": "/_v/mdm-seller/dev/settings",
+      "public": true
+    },
+    "manualCapture": {
+      "path": "/_v/mdm-seller/capture",
+      "public": true
+    },
+    "myProducts": {
+      "path": "/_v/mdm-seller/my-products",
+      "public": true
+    },
+    "captureEvents": {
+      "path": "/_v/mdm-seller/capture-events",
+      "public": true
+    },
+    "subscriptionCheckout": {
+      "path": "/_v/mdm-seller/subscription/checkout",
+      "public": true
+    },
+    "subscriptionWebhook": {
+      "path": "/_v/mdm-seller/subscription/webhook",
+      "public": true
+    },
+    "subscriptionStatus": {
+      "path": "/_v/mdm-seller/subscription/status",
+      "public": true
+    }
+  },
+  "events": {
+    "catalogChange": {
+      "keys": [
+        "broadcaster.notification"
+      ]
+    }
+  }
+}
