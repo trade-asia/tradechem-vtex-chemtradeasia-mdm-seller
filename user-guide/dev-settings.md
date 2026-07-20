@@ -19,7 +19,8 @@ For a linked dev workspace this looks like `https://devadnan--adnnor332.myvtex.c
 | `mdmApiEndpoint` | Base URL of the MDM API (defaults to `https://tradeasia.exchange/api/v1` if unset) |
 | `mdmUsername` / `mdmPassword` | MDM login used to obtain a bearer token |
 | `mdmSellerToken` | A pre-issued, seller-scoped MDM token — preferred over username/password if set |
-| `stripeSecretKey` | Stripe secret key (`sk_test_...` / `sk_live_...`) |
+| `stripeSecretKey` | Stripe secret key (`sk_test_...` / `sk_live_...`) — needed for both Subscription pages |
+| `stripePublishableKey` | Stripe publishable key (`pk_test_...` / `pk_live_...`) — needed only for the **Subscription (Embed)** page; safe to leave unset if you're only using the redirect-based Subscription page |
 | `stripeWebhookSecret` | Signing secret (`whsec_...`) for the subscription webhook |
 | `stripeMonthlyAmountUsd` / `stripeYearlyAmountUsd` | Plan prices in USD — default to `25` / `250` if unset |
 

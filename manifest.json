@@ -79,6 +79,11 @@
           "ui:widget": "password"
         }
       },
+      "stripePublishableKey": {
+        "title": "Stripe Publishable Key",
+        "description": "Client-side Stripe key (pk_test_... or pk_live_...), used only by the embedded Subscription (Embed) page to mount Stripe's Payment Element. Not needed for the redirect-based Subscription page.",
+        "type": "string"
+      },
       "stripeWebhookSecret": {
         "title": "Stripe Webhook Signing Secret",
         "description": "Signing secret (whsec_...) for the Stripe webhook endpoint pointed at /_v/mdm-seller/subscription/webhook. Used to verify incoming events.",

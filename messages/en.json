@@ -1,5 +1,6 @@
 {
   "mdm-seller.navigation.label": "MDM",
   "mdm-seller.navigation.documents": "Documents",
-  "mdm-seller.navigation.subscription": "Subscription"
+  "mdm-seller.navigation.subscription": "Subscription",
+  "mdm-seller.navigation.subscriptionEmbed": "Subscription (Embed)"
 }

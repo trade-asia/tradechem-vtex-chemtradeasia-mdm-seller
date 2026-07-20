@@ -49,6 +49,10 @@
     "subscriptionStatus": {
       "path": "/_v/mdm-seller/subscription/status",
       "public": true
+    },
+    "subscriptionEmbedInit": {
+      "path": "/_v/mdm-seller/subscription/embed/init",
+      "public": true
     }
   },
   "events": {
