@@ -53,6 +53,22 @@
     "subscriptionEmbedInit": {
       "path": "/_v/mdm-seller/subscription/embed/init",
       "public": true
+    },
+    "mdmSubscription": {
+      "path": "/_v/mdm-seller/mdm-subscription",
+      "public": true
+    },
+    "mdmSubscriptionPlans": {
+      "path": "/_v/mdm-seller/mdm-plans",
+      "public": true
+    },
+    "mdmSubscriptionInvoices": {
+      "path": "/_v/mdm-seller/mdm-invoices",
+      "public": true
+    },
+    "mdmSubscriptionCheckout": {
+      "path": "/_v/mdm-seller/subscription/mdm-checkout",
+      "public": true
     }
   },
   "events": {

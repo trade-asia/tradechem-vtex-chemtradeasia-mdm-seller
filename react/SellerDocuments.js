@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { PageHeader, Spinner, Alert, Input, Dropdown, Button, Modal, Tag, Pagination } from 'vtex.styleguide'
+import { Spinner, Alert, Input, Dropdown, Button, Modal, Tag, Pagination } from 'vtex.styleguide'
 
 const BASE = '/_v/mdm-seller'
 const PICKER_PER_PAGE = 20
@@ -572,10 +572,12 @@ const SellerDocuments = () => {
 
   return (
     <div className="pa6">
-      <PageHeader
-        title="My Documents"
-        subtitle="Upload and manage your SDS / TDS / MSDS documents for marketplace products"
-      />
+      <div style={{ fontSize: 28, fontWeight: 700, color: '#142032', marginBottom: 4 }}>
+        My Documents
+      </div>
+      <div style={{ fontSize: 14, color: '#666', marginBottom: 24 }}>
+        Upload and manage your SDS / TDS / MSDS documents for marketplace products
+      </div>
 
       {!selected ? (
         <>

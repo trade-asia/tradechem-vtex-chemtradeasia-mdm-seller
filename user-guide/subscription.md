@@ -1,58 +1,29 @@
-# Subscription & Billing
+# Subscription
 
 Go to **Admin → MDM → Subscription**.
 
-> There are two Subscription pages in the sidebar — **Subscription** and **Subscription (Embed)**. They're the same subscription, just two ways to pay: Subscription sends you to Stripe's own checkout page; Subscription (Embed) collects your card without leaving this site. Everything below applies to both — the only difference is described in [Paying without leaving the page](#paying-without-leaving-the-page-subscription-embed).
+This page shows what's on file for your account, checked live — not something stored on this site.
 
-## Checking your status
+## If you already have a subscription
 
-At the top of the page, a status badge shows your current subscription state:
+You'll see a card with your plan name, a status badge, and either a renewal date or a cancellation date, followed by your invoice history (invoice reference, date, status, amount).
 
 | Status | Meaning |
 |---|---|
 | **Active** | Your subscription is paid and current. |
 | **Trialing** | You're in a trial period. |
-| **Past due** | A recent payment failed — Stripe will retry automatically. |
+| **Past due** | A recent payment failed. |
 | **Canceled** | Your subscription has ended. |
-| **No subscription yet** | You haven't subscribed. |
 
-If you have an active plan, you'll also see which plan (Monthly/Yearly) and its renewal date.
+This is currently **read-only** — there's no cancel or change-plan button on this page yet.
 
-## Subscribing
+## If you don't have a subscription yet
 
-Fill in the form below the status card:
+The page shows the available plans instead — name, description, feature list, and price (with a Monthly/Yearly toggle if a plan offers both). The plan you'd get the best deal on is marked **Best value**.
 
-| Field | Required? |
-|---|---|
-| Company name | Optional |
-| Contact name | Required |
-| Email | Required — used for your Stripe receipt and account |
-| Phone | Optional |
-| Plan | Monthly or Yearly — pricing is shown next to each option |
-
-Click **Pay $X/mo** or **Pay $X/yr**. You'll be redirected to Stripe's secure checkout page to enter your card details — no payment information is ever entered on this site directly.
-
-## After payment
-
-- On success, you're returned to this page with a confirmation message. Status may take a few seconds to update — refresh the page if it still shows the old status.
-- If you cancel out of the Stripe checkout page without paying, you're returned here with a "Checkout was canceled" notice and no charge is made.
-
-## Paying without leaving the page (Subscription (Embed))
-
-On **Subscription (Embed)**, the same form has a **Continue to payment** button instead of a Pay button. After clicking it:
-
-1. A card entry box appears on the same page (Stripe's Payment Element) — you never leave this site.
-2. Enter your card details there and click **Pay $X/mo** (or **/yr**).
-3. Most cards complete immediately, showing "Payment submitted" without any redirect. Some cards require an extra bank verification step (3D Secure) — if so, you'll briefly leave the page for that step and come straight back automatically.
-
-Use **← Back** to change your plan or details before paying. Card details are always entered directly into Stripe's embedded form, never seen by this site — the "embed" only refers to where the form appears, not who processes the payment.
-
-## Changing plans
-
-If you already have an active subscription, the form's title changes to **Change plan** — select the other plan and pay to switch. Managing an existing subscription (updating your card, canceling, viewing invoices) is done through the Stripe customer portal / receipt email, not on this page.
+Plan buttons currently say **"Select plan — coming soon"** and are disabled. Checkout isn't wired up on this page yet — there's no way to purchase a plan from here at this time.
 
 ## Troubleshooting
 
-- **"Stripe is not configured for this seller yet."** — Payments haven't been enabled for your account yet. Contact the marketplace administrator.
-- **Status stuck on "No subscription yet" after paying** — this page shows the last status Stripe confirmed. It's usually a few seconds behind; reload the page. If it's still wrong after a few minutes, contact support with your payment confirmation email.
-- **On Subscription (Embed): the card entry box never appears after "Continue to payment"** — this loads Stripe's own script into the page; if your browser or network blocks it, try the regular **Subscription** page instead, which doesn't need it.
+- **"Failed to load subscription from MDM" / "Failed to load plans from MDM"** — this page depends on a backend integration that's still being set up. Contact the marketplace administrator; this isn't something you can fix from here.
+- **Nothing seems to update after contacting support about a plan change** — expected for now, since there's no self-service action on this page yet.

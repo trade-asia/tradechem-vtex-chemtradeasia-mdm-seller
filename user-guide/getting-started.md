@@ -8,7 +8,7 @@ This guide is for **sellers** using the marketplace admin. It covers where to fi
 2. In the left sidebar, open the **MDM** section.
 3. You'll see two pages:
    - **Documents** — upload and manage SDS / TDS / MSDS PDFs for your products.
-   - **Subscription** — subscribe to the marketplace plan and view your billing status.
+   - **Subscription** — view your current marketplace plan, status, and invoices, or see available plans if you don't have one yet.
 
 ## What you can see
 

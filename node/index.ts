@@ -5,6 +5,7 @@ import { getSellerDocuments, uploadSellerDocument, deleteSellerDocument } from '
 import { devReadSettings, devSaveSettings, devDeleteSettings } from './handlers/devSettingsHandler'
 import { catalogCapture, manualCapture, listMyProducts, captureEventLog } from './handlers/productCaptureHandler'
 import { createSubscriptionCheckout, stripeWebhookHandler, getSubscriptionStatus, initEmbeddedSubscription } from './handlers/subscriptionHandler'
+import { getMySubscription, getMySubscriptionPlans, getMySubscriptionInvoices, initMdmSubscriptionCheckout } from './handlers/mdmSubscriptionHandler'
 
 declare global {
   type Context = ServiceContext<Clients, State>
@@ -40,5 +41,9 @@ export default new Service<Clients, State, ParamsContext>({
     subscriptionWebhook: method({ POST: [stripeWebhookHandler] }),
     subscriptionStatus: method({ GET: [getSubscriptionStatus] }),
     subscriptionEmbedInit: method({ POST: [initEmbeddedSubscription] }),
+    mdmSubscription: method({ GET: [getMySubscription] }),
+    mdmSubscriptionPlans: method({ GET: [getMySubscriptionPlans] }),
+    mdmSubscriptionInvoices: method({ GET: [getMySubscriptionInvoices] }),
+    mdmSubscriptionCheckout: method({ POST: [initMdmSubscriptionCheckout] }),
   },
 })

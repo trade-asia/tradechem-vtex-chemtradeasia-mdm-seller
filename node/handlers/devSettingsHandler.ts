@@ -99,14 +99,15 @@ export async function devDeleteSettings(ctx: ServiceContext<Clients>) {
   }
 }
 
-// Preferred auth: a per-seller MDM token (bound server-side to this seller's
-// scope). Falls back to admin credentials + /user/token for dev only.
+// Every MDM API call takes an explicit vtex_seller_id/external_reference_id
+// param — that's what scopes data to a seller, not which token was used. A
+// separate per-seller "mdmSellerToken" was tried at one point but added no
+// real isolation (mdmUsername/mdmPassword are stored either way) and caused
+// a real bug: a stale/wrong-scoped saved token got silently preferred over
+// a working one, specifically breaking the Subscriptions module. Dropped —
+// always derive the token from mdmUsername/mdmPassword.
 export async function getSellerMdmToken(ctx: any): Promise<string | null> {
   const config = await readMdmConfig(ctx)
-  if (config?.mdmSellerToken) {
-    if (config.mdmApiEndpoint) ctx.clients.mdm.setBaseUrl(config.mdmApiEndpoint)
-    return config.mdmSellerToken
-  }
   if (config?.mdmUsername && config?.mdmPassword) {
     if (config.mdmApiEndpoint) ctx.clients.mdm.setBaseUrl(config.mdmApiEndpoint)
     const { getMdmToken } = await import('../helpers/getMdmToken')
@@ -121,11 +122,11 @@ export async function readMdmConfig(ctx: ServiceContext<Clients>): Promise<any> 
   let settings: any = {}
   try { settings = await ctx.clients.apps.getAppSettings(appId) } catch {}
 
-  if (settings?.mdmSellerToken || (settings?.mdmUsername && settings?.mdmPassword)) return settings
+  if (settings?.mdmUsername && settings?.mdmPassword) return settings
 
   try {
     const devConfig = await ctx.clients.vbase.getJSON<any>(DEV_CONFIG_BUCKET, DEV_CONFIG_KEY, true)
-    if (devConfig?.mdmSellerToken || devConfig?.mdmUsername) return devConfig
+    if (devConfig?.mdmUsername) return devConfig
   } catch {}
 
   return settings ?? {}

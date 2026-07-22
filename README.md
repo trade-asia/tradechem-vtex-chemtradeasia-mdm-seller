@@ -3,8 +3,8 @@
 VTEX IO app (`tradeasiab2b.chemtradeasia-mdm-seller`) providing seller-facing MDM tools inside the seller's own VTEX admin:
 
 - **Documents** — upload/manage a seller's own SDS / TDS / MSDS PDFs against their MDM-linked products.
-- **Subscription** — seller marketplace subscription (Monthly/Yearly) via Stripe Checkout (redirect to Stripe's hosted page).
-- **Subscription (Embed)** — the same subscription, paid without leaving the page via Stripe's embedded Payment Element.
+- **Subscription** — landing page for the seller's marketplace subscription. Reads the seller's current subscription (and invoice history) directly from **MDM's Subscriptions module** — MDM's system of record, not Stripe. If MDM has no subscription for this seller, shows MDM's available plans instead. Read-only for now — plan selection isn't wired to checkout yet. See [Subscription (MDM-backed)](#subscription-mdm-backed) below.
+- **Embed Demo** — a standalone demo of paying via Stripe's embedded Payment Element without leaving the page. Talks to Stripe directly; **not connected to MDM**.
 - **Catalog capture** — background sync of the seller's own catalog products into MDM (broadcaster event + manual trigger).
 
 ## Structure
@@ -21,8 +21,8 @@ react/         Admin UI pages (one component per admin route)
 | Path | Component | Purpose |
 |---|---|---|
 | `/admin/mdm-seller/documents` | `SellerDocuments` | Upload/manage SDS/TDS/MSDS docs, scoped to the logged-in seller |
-| `/admin/mdm-seller/subscription` | `SellerSubscription` | Subscribe / view subscription status — redirects to Stripe Checkout to pay |
-| `/admin/mdm-seller/subscription-embed` | `SellerSubscriptionEmbed` | Same subscription, paid inline via Stripe's Payment Element (no redirect) |
+| `/admin/mdm-seller/subscription` | `SellerSubscription` | Current subscription + invoices (or plan list), read from MDM — no Stripe wiring yet |
+| `/admin/mdm-seller/subscription-embed` | `SellerSubscriptionEmbed` | Nav label "Embed Demo" — standalone Stripe Payment Element demo, unrelated to MDM |
 
 Reached from the VTEX Admin sidebar under **MDM** (registered in `admin/navigation.json`).
 
@@ -48,14 +48,28 @@ All routes are defined in `node/service.json` and mounted at `https://{account}.
 | `POST` | `/_v/mdm-seller/documents?vtexProductId=...` | `uploadSellerDocument` | Upload a PDF (`multipart/form-data`: `file`, `type`, `display_name?`, `grade?`, `origin_countries[]?`) |
 | `POST` | `/_v/mdm-seller/documents/delete` | `deleteSellerDocument` | Delete a document (`{ documentId }`) — MDM enforces the seller can only delete their own |
 
-### Subscription (Stripe)
+### Subscription (MDM-backed, read-only)
+
+Powers the **Subscription** page.
 
 | Method | Path | Handler | Purpose |
 |---|---|---|---|
-| `POST` | `/_v/mdm-seller/subscription/checkout` | `createSubscriptionCheckout` (`subscriptionHandler.ts`) | Creates a Stripe Checkout Session, `mode: subscription`. Body: `{ plan: "monthly"\|"yearly", name, email, company?, phone? }`. Returns `{ success, url }` — redirect the browser to `url`. **Price is always resolved server-side from settings; the client only controls `plan`.** |
+| `GET` | `/_v/mdm-seller/mdm-subscription` | `getMySubscription` (`mdmSubscriptionHandler.ts`) | This seller's current subscription **from MDM** (`GET {mdmApiEndpoint}/subscriptions?source=vtex&external_reference_id=...`) — `null` if none |
+| `GET` | `/_v/mdm-seller/mdm-invoices` | `getMySubscriptionInvoices` | This seller's invoice history **from MDM** (`GET {mdmApiEndpoint}/subscriptions/invoices?source=vtex&external_reference_id=...`) — only fetched when a subscription exists |
+| `GET` | `/_v/mdm-seller/mdm-plans` | `getMySubscriptionPlans` | Available plans **from MDM** (`GET {mdmApiEndpoint}/subscriptions/plans?source=vtex`), shown when the seller has no subscription yet |
+
+None of these touch Stripe. See [Subscription (MDM-backed)](#subscription-mdm-backed) below for scope and open questions.
+
+### Stripe (used by Embed Demo only)
+
+`createSubscriptionCheckout` (redirect-to-Stripe-Checkout) is currently **not called by any page** — it was the old Subscription page's flow before that page was repointed at MDM. Left in place, unused, for whenever checkout gets wired back in.
+
+| Method | Path | Handler | Purpose |
+|---|---|---|---|
+| `POST` | `/_v/mdm-seller/subscription/checkout` | `createSubscriptionCheckout` (`subscriptionHandler.ts`) | *(currently unused)* Creates a Stripe Checkout Session, `mode: subscription`. Body: `{ plan: "monthly"\|"yearly", name, email, company?, phone? }`. Returns `{ success, url }` — redirect the browser to `url`. **Price is always resolved server-side from settings; the client only controls `plan`.** |
 | `POST` | `/_v/mdm-seller/subscription/webhook` | `stripeWebhookHandler` | Public Stripe webhook. Verifies `stripe-signature` against `stripeWebhookSecret`, then persists status to VBase on `checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted` |
-| `GET` | `/_v/mdm-seller/subscription/status` | `getSubscriptionStatus` | Current subscription record + configured plan pricing, for the UI |
-| `POST` | `/_v/mdm-seller/subscription/embed/init` | `initEmbeddedSubscription` | Creates a Stripe Customer + Subscription in `default_incomplete` status via the Subscriptions API (not Checkout Sessions), returns `{ clientSecret, publishableKey, subscriptionId }` for the browser to mount Stripe's Payment Element and confirm payment inline. Same server-side pricing guarantee as the redirect flow. |
+| `GET` | `/_v/mdm-seller/subscription/status` | `getSubscriptionStatus` | Current Stripe subscription record (VBase) + configured plan pricing — used by Embed Demo |
+| `POST` | `/_v/mdm-seller/subscription/embed/init` | `initEmbeddedSubscription` | Creates a Stripe Customer + Subscription in `default_incomplete` status via the Subscriptions API (not Checkout Sessions), returns `{ clientSecret, publishableKey, subscriptionId }` for the browser to mount Stripe's Payment Element and confirm payment inline. Used by Embed Demo. |
 
 ### Catalog capture
 
@@ -100,8 +114,8 @@ Defined in `manifest.json` → `settingsSchema`:
 |---|---|
 | `mdmApiEndpoint` | Base URL of the MDM API (defaults to `https://tradeasia.exchange/api/v1` if empty) |
 | `mdmUsername` / `mdmPassword` | MDM login used to obtain a bearer token |
-| `stripeSecretKey` | Stripe secret key (`sk_test_...` / `sk_live_...`) — used by both Subscription pages |
-| `stripePublishableKey` | Stripe publishable key (`pk_test_...` / `pk_live_...`) — used only by Subscription (Embed) to mount the Payment Element client-side |
+| `stripeSecretKey` | Stripe secret key (`sk_test_...` / `sk_live_...`) — used by Embed Demo (the Subscription page is MDM-backed and doesn't touch Stripe yet) |
+| `stripePublishableKey` | Stripe publishable key (`pk_test_...` / `pk_live_...`) — used only by Embed Demo to mount the Payment Element client-side |
 | `stripeWebhookSecret` | Signing secret (`whsec_...`) for the subscription webhook |
 | `stripeMonthlyAmountUsd` / `stripeYearlyAmountUsd` | Plan prices in USD — default to `25` / `250` if unset |
 
@@ -123,30 +137,19 @@ Defined in `manifest.json` → `settingsSchema`:
 | `mdm-subscription` | `stripe-products` | `{ monthly: productId, yearly: productId }` — Stripe Product ids created lazily by the embedded flow (Subscriptions API needs an existing Product, unlike Checkout Sessions) and cached to avoid recreating them on every checkout |
 | `mdmq` | `p{productId}`, `index`, `event-log` | Catalog-capture queue: per-product capture state, an index of captured product ids, and a rolling event log (last 30) |
 
-## Stripe subscription flow
+## Stripe embedded checkout (Embed Demo)
 
-Two independent pages, same backend pricing/webhook/status machinery underneath. Both guarantee the amount charged is always resolved server-side from settings — the browser only ever sends `plan`.
+Standalone demo, not wired to MDM. Guarantees the amount charged is always resolved server-side from settings — the browser only ever sends `plan`.
 
-### Redirect flow (Subscription)
-
-1. Seller fills the form on `/admin/mdm-seller/subscription` (plan, name, email, company, phone) and clicks **Pay**.
-2. Browser `POST`s to `/_v/mdm-seller/subscription/checkout`. The backend looks up `stripeMonthlyAmountUsd`/`stripeYearlyAmountUsd` from settings, creates a Stripe Checkout Session (`price_data` with `recurring.interval` set from the chosen plan), and returns the session `url`.
-3. Browser redirects to Stripe's hosted checkout page.
-4. On completion, Stripe redirects back to `/admin/mdm-seller/subscription?status=success|cancel` **and** asynchronously calls the webhook.
-5. The webhook (`/_v/mdm-seller/subscription/webhook`) verifies the signature and writes the subscription record to VBase (`mdm-subscription`/`status`) on `checkout.session.completed`.
-
-### Embedded flow (Subscription (Embed))
-
-1. Seller fills the same form on `/admin/mdm-seller/subscription-embed` and clicks **Continue to payment**.
+1. Seller fills the form on `/admin/mdm-seller/subscription-embed` and clicks **Continue to payment**.
 2. Browser `POST`s to `/_v/mdm-seller/subscription/embed/init`. The backend finds-or-creates a Stripe Customer by email, lazily creates (and caches) a Stripe Product per plan, then creates a Subscription in `default_incomplete` status via the **Subscriptions API** (not Checkout Sessions — that API doesn't support ad-hoc `product_data`, only an existing Product id) with `expand: ['latest_invoice.payment_intent']`, and returns that PaymentIntent's `clientSecret` plus the `publishableKey`.
 3. The browser loads Stripe.js (`https://js.stripe.com/v3/`) at runtime, mounts a Payment Element using the `clientSecret`, and on submit calls `stripe.confirmPayment({ redirect: 'if_required' })` — for most cards this completes without ever leaving the page; redirect-requiring methods (e.g. 3D Secure) still bounce out and back via `return_url`.
-4. Either way, Stripe's `customer.subscription.updated` webhook event (fired when the subscription moves from `incomplete` to `active`) is what actually persists the record — there's no `checkout.session.completed` event in this flow, so the webhook handler reads `name`/`email`/`company`/`phone`/`plan` from the **Subscription's own metadata** (set at creation) instead of a Checkout Session's.
+4. Stripe's `customer.subscription.updated` webhook event (fired when the subscription moves from `incomplete` to `active`) persists the record to VBase — the webhook handler reads `name`/`email`/`company`/`phone`/`plan` from the **Subscription's own metadata** (set at creation).
+5. The page polls `/_v/mdm-seller/subscription/status` to show the current status badge (Active / Past due / Canceled / none) and renewal date.
 
 > ⚠️ Loading `js.stripe.com` inside the VTEX Admin iframe depends on VTEX's CSP allowing it — this hasn't been confirmed by an actual browser test. If the Payment Element fails to mount, check the browser console for a CSP violation first.
 
-### Either flow
-
-The webhook (`/_v/mdm-seller/subscription/webhook`) verifies the signature and writes to VBase (`mdm-subscription`/`status`) on `checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`. Both Subscription pages poll `/_v/mdm-seller/subscription/status` to show the current status badge (Active / Past due / Canceled / none) and renewal date.
+The redirect-to-Stripe-Checkout flow (`createSubscriptionCheckout`) still exists server-side but isn't called by any page right now — see the note in [Backend routes](#backend-routes) above.
 
 ### Configuring the webhook
 
@@ -157,6 +160,24 @@ https://{account}.myvtex.com/_v/mdm-seller/subscription/webhook
 ```
 
 Events to send: `checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`. Copy the generated signing secret into `stripeWebhookSecret`.
+
+## Subscription (MDM-backed)
+
+Per MDM's own integration guide (`docs/vtex-subscriptions-integration-guide.html` in the MDM repo): **MDM never talks to Stripe directly** — VTEX's billing engine owns checkout, MDM is the system of record VTEX reports into and reads back from. The **Subscription** page (`/admin/mdm-seller/subscription`) is the first, read-only step toward that: it shows what MDM currently knows about this seller, sourced from MDM's own Subscriptions module, not from Stripe or this app's own VBase status.
+
+**Current scope — seller side only, read-only:**
+
+1. `GET /_v/mdm-seller/mdm-subscription` → MDM's `GET /subscriptions?source=vtex&external_reference_id=...`. If found, the page shows the plan name, billing cycle, status, and renewal/cancellation date, **plus** invoice history via `GET /_v/mdm-seller/mdm-invoices` → MDM's `GET /subscriptions/invoices?...` (invoice ref, date, status, amount).
+2. If MDM has no subscription for this seller, the page instead calls `GET /_v/mdm-seller/mdm-plans` → MDM's `GET /subscriptions/plans?source=vtex` and renders plan cards (name, description, features, price, a Monthly/Yearly toggle if applicable, a "Best value" ribbon on the recommended plan, a Contact Sales link for `pricing_mode: "contact"` plans). Priced plans show a **disabled** "Select plan" button — deliberately not wired to Stripe yet.
+3. No manual name/email/company/phone form on this page — MDM's guide is explicit that a seller's profile should be pushed into MDM server-side (`POST /subscriptions/events` with just the `customer` block, at registration/profile-update time) rather than typed in ad hoc at checkout. That sync call **is not implemented yet** — this page currently only reads.
+
+**Explicitly out of scope for now** (not implemented, not started): wiring the plan buttons to Stripe checkout, reporting checkout/renewal events back to MDM (`POST /subscriptions/events`), registering MDM's own separate Stripe webhook with the metadata keys it expects, the seller-profile sync call, and any VTEX Admin-side (marketplace-admin, cross-seller) Subscriptions/Billing screens — all of that is a later step, seller side only for now.
+
+**Open questions before going further** (from reading MDM's guide):
+
+- **`external_reference_id`** — MDM's guide calls this "the VTEX Seller ID" without defining it precisely. This app currently sends `ctx.vtex.account` (the VTEX account name). Needs confirming with the MDM team as the intended value — it may instead mean a marketplace-specific seller id distinct from the account name.
+- **Auth — confirmed broken as currently implemented.** The code assumes the same MDM Bearer token used for Products/Documents (`mdmUsername`/`mdmPassword` → `/user/token`, cached — see `getSellerMdmToken()`) also covers `/subscriptions/*`, since it's the same API root. Live testing against the real MDM API returns `{"success":false,"detail":"Unauthenticated."}` on both `/subscriptions` and `/subscriptions/plans`. Needs the MDM team to confirm whether the Subscriptions module needs separate credentials/scope, or whether this MDM account simply doesn't have the module enabled yet.
+- **Response envelope** — MDM's guide shows trimmed example payloads without a fully explicit top-level shape for `GET /subscriptions`, `GET /subscriptions/plans`, `GET /subscriptions/invoices`. The client methods defensively handle both a bare array and `{ data: [...] }` — not yet confirmed which it actually is, since every real call so far has failed auth before reaching a response body worth inspecting.
 
 ## Local development
 

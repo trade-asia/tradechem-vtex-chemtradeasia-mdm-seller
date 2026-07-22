@@ -1,4 +1,4 @@
-import { ExternalClient, InstanceOptions, IOContext } from '@vtex/api'
+import { ExternalClient, InstanceOptions, IOContext, CacheType } from '@vtex/api'
 
 const DEFAULT_BASE_URL = 'https://tradeasia.exchange/api/v1'
 
@@ -125,6 +125,62 @@ export class MdmClient extends ExternalClient {
       headers: { Authorization: `Bearer ${token}` },
       data: { vtex_seller_id: vtexSellerId },
     } as any)
+  }
+
+  // MDM Subscriptions module — see docs/vtex-subscriptions-integration-guide.html
+  // (MDM repo). MDM never talks to Stripe itself; this is read-only lookups
+  // against MDM's system of record.
+  //
+  // cacheable: CacheType.None on all three — @vtex/api's HTTP client caches
+  // GET responses by URL only (headers, including Authorization, aren't part
+  // of the cache key). These URLs are otherwise static per seller, so the
+  // very first response (e.g. a 401 while a token was still being sorted
+  // out) would get cached and silently served back forever regardless of
+  // which token is sent on later calls — confirmed live: a manual curl with
+  // a known-good fresh token succeeded while this client kept returning a
+  // stale cached "Unauthenticated." for the same URL.
+  public async getSubscriptionPlans(token: string): Promise<any[]> {
+    const res: any = await this.http.get(this.url('/subscriptions/plans?source=vtex'), {
+      headers: { Authorization: `Bearer ${token}` },
+      cacheable: CacheType.None,
+    } as any)
+    if (Array.isArray(res)) return res
+    if (Array.isArray(res?.data)) return res.data
+    return []
+  }
+
+  // externalReferenceId = the VTEX Seller ID (currently ctx.vtex.account —
+  // needs confirming with the MDM team as the definitive value). Returns the
+  // first matching subscription, or null if this seller has none yet.
+  public async getSubscription(token: string, externalReferenceId: string): Promise<any | null> {
+    const res: any = await this.http.get(
+      this.url(`/subscriptions?source=vtex&external_reference_id=${encodeURIComponent(externalReferenceId)}`),
+      { headers: { Authorization: `Bearer ${token}` }, cacheable: CacheType.None } as any
+    )
+    const list = Array.isArray(res) ? res : Array.isArray(res?.data) ? res.data : []
+    return list[0] ?? null
+  }
+
+  public async getSubscriptionInvoices(token: string, externalReferenceId: string): Promise<any[]> {
+    const res: any = await this.http.get(
+      this.url(`/subscriptions/invoices?source=vtex&external_reference_id=${encodeURIComponent(externalReferenceId)}`),
+      { headers: { Authorization: `Bearer ${token}` }, cacheable: CacheType.None } as any
+    )
+    return Array.isArray(res) ? res : Array.isArray(res?.data) ? res.data : []
+  }
+
+  // The single ingestion endpoint MDM's guide describes — this is what
+  // actually creates the subscription record in MDM. Called synchronously
+  // right after we create the Stripe Subscription (real checkout) so MDM's
+  // own Stripe webhook (a separate, direct Stripe -> MDM path — see
+  // docs/vtex-subscriptions-integration-guide.html) has an existing record
+  // to update from that point on; MDM never creates one from a bare webhook
+  // event alone since it needs plan_id, which only we know at creation time.
+  public async reportSubscriptionEvent(token: string, payload: any): Promise<any> {
+    const res: any = await this.http.post(this.url('/subscriptions/events'), payload, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    return res?.data ?? res
   }
 
   private url(path: string): string {

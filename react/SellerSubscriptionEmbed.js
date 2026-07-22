@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { PageHeader, Spinner, Alert, Input, RadioGroup, Button } from 'vtex.styleguide'
+import { Spinner, Alert, Input, RadioGroup, Button } from 'vtex.styleguide'
 
 const BASE = '/_v/mdm-seller'
 const STRIPE_JS_SRC = 'https://js.stripe.com/v3/'
@@ -201,10 +201,12 @@ const SellerSubscriptionEmbed = () => {
 
   return (
     <div className="pa6">
-      <PageHeader
-        title="Subscription (Embed)"
-        subtitle="Pay without leaving this page — powered by Stripe's embedded Payment Element"
-      />
+      <div style={{ fontSize: 28, fontWeight: 700, color: '#142032', marginBottom: 4 }}>
+        Embed Demo
+      </div>
+      <div style={{ fontSize: 14, color: '#666', marginBottom: 24 }}>
+        Stripe embedded Payment Element demo — pays directly through Stripe, not connected to MDM
+      </div>
 
       {returnStatus === 'success' && (
         <div style={{ marginBottom: 16 }}>
