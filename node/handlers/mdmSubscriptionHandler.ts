@@ -223,7 +223,16 @@ export async function initMdmSubscriptionCheckout(ctx: ServiceContext<Clients>) 
   const stripe = new Stripe(config.stripeSecretKey)
   const amount = Number(cycle.effective_price ?? cycle.price)
   const currency = String(cycle.currency ?? 'USD').toLowerCase()
-  const interval: 'month' | 'year' = cycle.interval === 'year' ? 'year' : 'month'
+
+  // Bug fixed here: this used to check only for 'year' and defaulted every
+  // other MDM interval — including 'day' and 'week' — to 'month', and never
+  // read interval_count at all. A real "every 4 days" plan was silently
+  // billed monthly instead. Stripe supports day/week/month/year natively;
+  // pass MDM's values straight through.
+  const STRIPE_INTERVALS = ['day', 'week', 'month', 'year'] as const
+  type StripeInterval = typeof STRIPE_INTERVALS[number]
+  const interval: StripeInterval = STRIPE_INTERVALS.includes(cycle.interval) ? cycle.interval : 'month'
+  const intervalCount = Number(cycle.interval_count) > 0 ? Number(cycle.interval_count) : 1
 
   const displayName = deriveDisplayName(email)
 
@@ -253,7 +262,7 @@ export async function initMdmSubscriptionCheckout(ctx: ServiceContext<Clients>) 
           price_data: {
             currency,
             unit_amount: Math.round(amount * 100),
-            recurring: { interval },
+            recurring: { interval, interval_count: intervalCount },
             product: productId,
           },
         },
