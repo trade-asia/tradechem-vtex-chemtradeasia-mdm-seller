@@ -6,6 +6,8 @@ import { devReadSettings, devSaveSettings, devDeleteSettings } from './handlers/
 import { catalogCapture, manualCapture, listMyProducts, captureEventLog } from './handlers/productCaptureHandler'
 import { createSubscriptionCheckout, stripeWebhookHandler, getSubscriptionStatus, initEmbeddedSubscription } from './handlers/subscriptionHandler'
 import { getMySubscription, getMySubscriptionPlans, getMySubscriptionInvoices, initMdmSubscriptionCheckout } from './handlers/mdmSubscriptionHandler'
+import { logsHub } from './handlers/logsHubHandler'
+import { debugAdminToken } from './handlers/debugAdminTokenHandler'
 
 declare global {
   type Context = ServiceContext<Clients, State>
@@ -44,6 +46,8 @@ export default new Service<Clients, State, ParamsContext>({
     mdmSubscription: method({ GET: [getMySubscription] }),
     mdmSubscriptionPlans: method({ GET: [getMySubscriptionPlans] }),
     mdmSubscriptionInvoices: method({ GET: [getMySubscriptionInvoices] }),
+    logsHub: method({ GET: [logsHub] }),
+    debugAdminToken: method({ GET: [debugAdminToken] }),
     mdmSubscriptionCheckout: method({ POST: [initMdmSubscriptionCheckout] }),
   },
 })

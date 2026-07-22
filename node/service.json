@@ -69,6 +69,14 @@
     "mdmSubscriptionCheckout": {
       "path": "/_v/mdm-seller/subscription/mdm-checkout",
       "public": true
+    },
+    "logsHub": {
+      "path": "/_v/mdm-seller/logs",
+      "public": true
+    },
+    "debugAdminToken": {
+      "path": "/_v/mdm-seller/debug-admin-token",
+      "public": true
     }
   },
   "events": {

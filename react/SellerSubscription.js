@@ -61,7 +61,9 @@ const loadStripeJs = () => new Promise((resolve, reject) => {
 // ── Current subscription card — read straight from MDM, not Stripe/VBase ──
 const CurrentSubscriptionCard = ({ subscription }) => {
   const meta = STATUS_LABELS[subscription.status] ?? { label: subscription.status, color: '#6b7c93', bg: '#f7f9fa', border: '#e3e4e6' }
-  const canceled = !!subscription.canceled_at
+  // Trust status, not canceled_at — MDM may leave a stale canceled_at on an
+  // active row when a subscription is reactivated rather than recreated.
+  const canceled = subscription.status === 'canceled'
 
   return (
     <div style={{
@@ -574,11 +576,20 @@ const SellerSubscription = () => {
 
       if (subData.subscription) {
         setSubscription(subData.subscription)
-        setPlans(null)
 
         const invRes = await fetch(`${BASE}/mdm-invoices`)
         const invData = await parseResponse(invRes)
         setInvoices(invData.success ? (invData.invoices ?? []) : [])
+
+        // Canceled subscription — load plans too so the seller can re-subscribe
+        const isCanceled = subData.subscription.status === 'canceled'
+        if (isCanceled) {
+          const plansRes = await fetch(`${BASE}/mdm-plans`)
+          const plansData = await parseResponse(plansRes)
+          setPlans(plansData.success ? (plansData.plans ?? []) : null)
+        } else {
+          setPlans(null)
+        }
       } else {
         setSubscription(null)
         setInvoices([])
@@ -613,6 +624,17 @@ const SellerSubscription = () => {
       ) : subscription ? (
         <>
           <CurrentSubscriptionCard subscription={subscription} />
+          {subscription.status === 'canceled' && plans?.length > 0 && (
+            <div style={{ marginBottom: 28 }}>
+              <div style={{ fontWeight: 700, fontSize: 16, color: '#142032', marginBottom: 4 }}>
+                Re-subscribe
+              </div>
+              <div style={{ fontSize: 13, color: '#667', marginBottom: 16 }}>
+                Your subscription was canceled. Pick a plan to start a new one — it takes effect immediately.
+              </div>
+              <PlanSelection plans={plans} onSelect={(plan, cycle) => setCheckout({ plan, cycle })} />
+            </div>
+          )}
           <InvoicesTable invoices={invoices} />
         </>
       ) : plans ? (

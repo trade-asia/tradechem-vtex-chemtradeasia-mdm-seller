@@ -27,6 +27,18 @@ function externalReferenceId(ctx: ServiceContext<Clients>): string {
   return ctx.vtex.account
 }
 
+// The VTEX admin JWT carries only an email (see getVtexAdminUser.ts), no
+// separate first/last name — omitting display_name entirely left MDM
+// showing the raw external_reference_id (our account slug) as "First Name"
+// instead. Derive a readable name from the email's local part as a stand-in
+// until a real name source is available (e.g. "adnan.shahzad" -> "Adnan
+// Shahzad"), which MDM splits into first/last on the space.
+function deriveDisplayName(email: string): string {
+  const local = email.split('@')[0] ?? ''
+  const words = local.split(/[._-]+/).filter(Boolean).map(w => w.charAt(0).toUpperCase() + w.slice(1))
+  return words.length ? words.join(' ') : email
+}
+
 // MDM's guide: "this is also how a seller gets into MDM in the first place
 // ... call this with only the customer block whenever a seller registers or
 // updates their profile on VTEX, independent of whether they ever buy a
@@ -43,6 +55,7 @@ async function syncSellerToMdm(ctx: ServiceContext<Clients>, token: string): Pro
         external_reference_id: externalReferenceId(ctx),
         customer_group_type: 'seller',
         email,
+        display_name: deriveDisplayName(email),
       },
     })
   } catch (err: any) {
@@ -212,11 +225,11 @@ export async function initMdmSubscriptionCheckout(ctx: ServiceContext<Clients>) 
   const currency = String(cycle.currency ?? 'USD').toLowerCase()
   const interval: 'month' | 'year' = cycle.interval === 'year' ? 'year' : 'month'
 
+  const displayName = deriveDisplayName(email)
+
   // Required MDM metadata keys, exact names — this is the only way MDM's own
-  // webhook can attribute a Stripe event to a seller later. display_name is
-  // optional per MDM's guide and we don't have a reliable one from the VTEX
-  // admin token anyway (only email); email lives on the Stripe Customer
-  // object directly, so it's left out of metadata too.
+  // webhook can attribute a Stripe event to a seller later. email lives on
+  // the Stripe Customer object directly, so it's left out of metadata.
   const metadata = {
     source: 'vtex',
     external_reference_id: externalReferenceId(ctx),
@@ -229,7 +242,7 @@ export async function initMdmSubscriptionCheckout(ctx: ServiceContext<Clients>) 
     const existingCustomers = await stripe.customers.list({ email, limit: 1 })
     const customer =
       existingCustomers.data[0] ??
-      (await stripe.customers.create({ email, metadata }))
+      (await stripe.customers.create({ email, name: displayName, metadata }))
 
     const productId = await getOrCreateProductId(ctx, stripe, String(planId), String(billingCycleId), `${plan.name} — ${cycle.label}`)
 
@@ -275,6 +288,7 @@ export async function initMdmSubscriptionCheckout(ctx: ServiceContext<Clients>) 
           external_reference_id: externalReferenceId(ctx),
           customer_group_type: 'seller',
           email,
+          display_name: displayName,
         },
         subscription: {
           plan_id: planId,
