@@ -12,11 +12,11 @@ Check that the file is a PDF under 20 MB and that a document type is selected �
 **Q: I can't delete a document.**
 You can only delete documents you uploaded yourself. Documents added by the marketplace or another seller aren't shown to you and can't be deleted from here.
 
-**Q: I can't subscribe to a plan from the Subscription page.**
-Correct for now — the Subscription page currently only shows your existing plan (if any) or the available plans; there's no purchase flow wired up on it yet. Contact the marketplace administrator about signing up.
+**Q: Why doesn't Subscribe ask me for my name or email?**
+It already knows — your email comes from your VTEX admin login automatically, so there's nothing to type before payment.
 
 **Q: Can I get a refund or cancel my subscription?**
 Not from this page yet — contact the marketplace administrator.
 
 **Q: Is my payment information stored on this site?**
-No. This app doesn't collect card details on the Subscription page at all right now.
+No. Card details are entered directly into Stripe's own embedded form and never touch this application.

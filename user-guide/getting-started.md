@@ -6,9 +6,10 @@ This guide is for **sellers** using the marketplace admin. It covers where to fi
 
 1. Log in to your VTEX Admin at `https://{your-account}.myvtex.com/admin`.
 2. In the left sidebar, open the **MDM** section.
-3. You'll see two pages:
+3. You'll see:
    - **Documents** — upload and manage SDS / TDS / MSDS PDFs for your products.
-   - **Subscription** — view your current marketplace plan, status, and invoices, or see available plans if you don't have one yet.
+   - **Subscription** — view your current marketplace plan, status, and invoices, subscribe if you don't have one yet, or see available plans.
+   - **Embed Demo** — a technical demo of a different payment method, unrelated to your actual subscription. Not something you need to use — safe to ignore.
 
 ## What you can see
 

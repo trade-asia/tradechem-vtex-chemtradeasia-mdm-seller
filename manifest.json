@@ -61,7 +61,7 @@
       },
       "mdmUsername": {
         "title": "MDM Username",
-        "description": "TEMPORARY (dev only): admin login. Replace with a seller-scoped MDM token before production rollout — sellers can read these settings on their own account.",
+        "description": "MDM login used to obtain a bearer token. A seller-scoped alternative token was tried and dropped — every MDM API call is already scoped by an explicit vtex_seller_id/external_reference_id parameter, so a separate token added no isolation and was a source of bugs (see node/handlers/devSettingsHandler.ts).",
         "type": "string"
       },
       "mdmPassword": {
@@ -73,7 +73,7 @@
       },
       "stripeSecretKey": {
         "title": "Stripe Secret Key",
-        "description": "Server-side Stripe API secret key (sk_test_... or sk_live_...), used to create Checkout Sessions.",
+        "description": "Server-side Stripe API secret key (sk_test_... or sk_live_...). Required for the Subscription page's real checkout (MDM-plan-backed) and the standalone Embed Demo page.",
         "type": "string",
         "widget": {
           "ui:widget": "password"
@@ -81,7 +81,7 @@
       },
       "stripePublishableKey": {
         "title": "Stripe Publishable Key",
-        "description": "Client-side Stripe key (pk_test_... or pk_live_...), used only by the embedded Subscription (Embed) page to mount Stripe's Payment Element. Not needed for the redirect-based Subscription page.",
+        "description": "Client-side Stripe key (pk_test_... or pk_live_...), used to mount Stripe's Payment Element. Required for the Subscription page's real checkout and for Embed Demo.",
         "type": "string"
       },
       "stripeWebhookSecret": {
@@ -93,13 +93,13 @@
         }
       },
       "stripeMonthlyAmountUsd": {
-        "title": "Monthly Plan Price (USD)",
-        "description": "Amount charged per month for the Monthly subscription plan. Defaults to 25 if not set.",
+        "title": "Monthly Plan Price (USD) — Embed Demo only",
+        "description": "Amount charged per month on the standalone Embed Demo page only. Defaults to 25 if not set. The real Subscription page prices plans from MDM directly and ignores this.",
         "type": "string"
       },
       "stripeYearlyAmountUsd": {
-        "title": "Yearly Plan Price (USD)",
-        "description": "Amount charged per year for the Yearly subscription plan. Defaults to 250 if not set.",
+        "title": "Yearly Plan Price (USD) — Embed Demo only",
+        "description": "Amount charged per year on the standalone Embed Demo page only. Defaults to 250 if not set. The real Subscription page prices plans from MDM directly and ignores this.",
         "type": "string"
       }
     }

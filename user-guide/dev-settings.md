@@ -18,13 +18,26 @@ For a linked dev workspace this looks like `https://devadnan--adnnor332.myvtex.c
 |---|---|
 | `mdmApiEndpoint` | Base URL of the MDM API (defaults to `https://tradeasia.exchange/api/v1` if unset) |
 | `mdmUsername` / `mdmPassword` | MDM login used to obtain a bearer token |
-| `mdmSellerToken` | A pre-issued, seller-scoped MDM token — preferred over username/password if set |
-| `stripeSecretKey` | Stripe secret key (`sk_test_...` / `sk_live_...`) — needed for both Subscription pages |
-| `stripePublishableKey` | Stripe publishable key (`pk_test_...` / `pk_live_...`) — needed only for the **Subscription (Embed)** page; safe to leave unset if you're only using the redirect-based Subscription page |
-| `stripeWebhookSecret` | Signing secret (`whsec_...`) for the subscription webhook |
-| `stripeMonthlyAmountUsd` / `stripeYearlyAmountUsd` | Plan prices in USD — default to `25` / `250` if unset |
+| `stripeSecretKey` | Stripe secret key (`sk_test_...` / `sk_live_...`) |
+| `stripePublishableKey` | Stripe publishable key (`pk_test_...` / `pk_live_...`) |
+| `stripeWebhookSecret` | Signing secret (`whsec_...`) for **our own** webhook only — see [README § Stripe webhooks](../README.md#configuring-the-webhooks) for why there are two separate webhooks now |
+| `stripeMonthlyAmountUsd` / `stripeYearlyAmountUsd` | Plan prices in USD, **Embed Demo page only** — default to `25` / `250` if unset. The real Subscription page prices plans from MDM directly and ignores these. |
 
 You're not limited to these — any field you POST gets saved and is readable by any handler that calls `readMdmConfig()`.
+
+> **Removed:** there used to be an `mdmSellerToken` setting (a pre-issued token, meant to be preferred over `mdmUsername`/`mdmPassword`). It was dropped — every MDM API call is already scoped by an explicit `vtex_seller_id`/`external_reference_id` parameter, so a separate token added no real isolation, and a stale saved one caused a real bug (the Subscription page failing with "Unauthenticated" against the Subscriptions module specifically, while the same account worked fine elsewhere). If you still have one saved from before, delete it — see **Remove** below.
+
+### Which settings are required for which feature
+
+| Feature | Required settings |
+|---|---|
+| Documents page | `mdmApiEndpoint` (or the default), `mdmUsername`, `mdmPassword` |
+| Subscription page — viewing status/plans | `mdmUsername`, `mdmPassword` |
+| Subscription page — **Subscribe** (real checkout) | `mdmUsername`, `mdmPassword`, `stripeSecretKey`, `stripePublishableKey` |
+| Embed Demo page | `stripeSecretKey`, `stripePublishableKey` — `stripeWebhookSecret` needed for its status badge to update after payment |
+| Catalog capture (broadcaster → MDM) | `mdmUsername`, `mdmPassword` |
+
+Nothing here needs `stripeWebhookSecret` to *complete* a payment — Stripe confirms that directly to the browser. It's only needed for status to update automatically afterward (Embed Demo's own VBase status) or, for real MDM-backed subscriptions, for MDM's *own separate* webhook to track renewals — see the README section linked above.
 
 ---
 
@@ -96,19 +109,24 @@ Removes just the listed keys; everything else stays as-is. Response:
 ## Where the values come from
 
 - **MDM credentials** (`mdmApiEndpoint`, `mdmUsername`, `mdmPassword`) — issued by whoever manages the ChemTradeAsia MDM system.
-- **`stripeSecretKey`** — Stripe Dashboard → Developers → API keys → "Secret key" (use a `sk_test_...` key while testing, switch to `sk_live_...` only when ready to take real payments).
-- **`stripePublishableKey`** — Stripe Dashboard → Developers → API keys → "Publishable key" (same page as the secret key). Only needed for the **Subscription (Embed)** page — the redirect-based Subscription page never loads Stripe.js client-side, so it works without this being set.
-- **`stripeWebhookSecret`** — Stripe Dashboard → Developers → Webhooks → **Add endpoint**, pointing at:
+- **`stripeSecretKey`** / **`stripePublishableKey`** — Stripe Dashboard → Developers → API keys (use `sk_test_...`/`pk_test_...` while testing, switch to the `_live_` pair only when ready to take real payments).
+- **`stripeWebhookSecret`** — **this is our own webhook only**, not MDM's. Stripe Dashboard → Developers → Webhooks → **Add endpoint**, pointing at:
   ```
   https://{workspace}--{account}.myvtex.com/_v/mdm-seller/subscription/webhook
   ```
-  Events to send: `checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`. Stripe shows a "Signing secret" once the endpoint is created — that's this value.
+  Events to send: `checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`. Stripe shows a "Signing secret" once the endpoint is created — that's this value. **Separately**, MDM registers its own webhook destination (a different URL, a different secret they hold, not stored here) pointing directly at their own API — see [README § Stripe webhooks](../README.md#configuring-the-webhooks) for why both exist.
 
 ⚠️ Don't leave example/placeholder text (like `whsec_YOUR_SECRET_HERE`) saved in `stripeWebhookSecret` — run the **List** command above and check the masked tail doesn't end in obvious placeholder text. A fake value there fails signature verification the moment a real webhook call comes in, which is a confusing thing to debug after the fact.
 
 ### Testing in Stripe Test mode
 
-If `stripeSecretKey`/`stripePublishableKey` are `sk_test_...`/`pk_test_...` (sandbox keys), no real card or money is involved. Use one of [Stripe's test cards](https://docs.stripe.com/testing) on either Subscription page — the simplest is `4242 4242 4242 4242`, any future expiry date, any 3-digit CVC, any postal code.
+If `stripeSecretKey`/`stripePublishableKey` are `sk_test_...`/`pk_test_...` (sandbox keys), no real card or money is involved. Use one of [Stripe's test cards](https://docs.stripe.com/testing) on any Subscription/Embed Demo page — the simplest is `4242 4242 4242 4242`, any future expiry date, any 3-digit CVC, any postal code.
+
+---
+
+## Diagnostics
+
+There's a browsable index of every diagnostic/data endpoint in this app — see [Logs & Diagnostics](logs-and-diagnostics.md).
 
 ---
 
