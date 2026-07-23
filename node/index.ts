@@ -3,9 +3,9 @@ import { Clients } from './clients'
 import { getSellerProducts, getSellerCountries } from './handlers/sellerProductsHandler'
 import { getSellerDocuments, uploadSellerDocument, deleteSellerDocument } from './handlers/sellerDocumentsHandler'
 import { devReadSettings, devSaveSettings, devDeleteSettings } from './handlers/devSettingsHandler'
-import { catalogCapture, manualCapture, listMyProducts, captureEventLog } from './handlers/productCaptureHandler'
+import { catalogCapture, manualCapture, listMyProducts, captureEventLog, inspectProduct } from './handlers/productCaptureHandler'
 import { createSubscriptionCheckout, stripeWebhookHandler, getSubscriptionStatus, initEmbeddedSubscription } from './handlers/subscriptionHandler'
-import { getMySubscription, getMySubscriptionPlans, getMySubscriptionInvoices, initMdmSubscriptionCheckout } from './handlers/mdmSubscriptionHandler'
+import { getMySubscription, getMySubscriptionPlans, getMySubscriptionInvoices, initMdmSubscriptionCheckout, cancelMySubscription } from './handlers/mdmSubscriptionHandler'
 import { logsHub } from './handlers/logsHubHandler'
 import { debugAdminToken } from './handlers/debugAdminTokenHandler'
 
@@ -37,6 +37,7 @@ export default new Service<Clients, State, ParamsContext>({
     sellerDocumentDelete: method({ POST: [deleteSellerDocument] }),
     devSettings: method({ GET: [devReadSettings], POST: [devSaveSettings], DELETE: [devDeleteSettings] }),
     manualCapture: method({ GET: [manualCapture] }),
+    inspectProduct: method({ GET: [inspectProduct] }),
     myProducts: method({ GET: [listMyProducts] }),
     captureEvents: method({ GET: [captureEventLog] }),
     subscriptionCheckout: method({ POST: [createSubscriptionCheckout] }),
@@ -49,5 +50,6 @@ export default new Service<Clients, State, ParamsContext>({
     logsHub: method({ GET: [logsHub] }),
     debugAdminToken: method({ GET: [debugAdminToken] }),
     mdmSubscriptionCheckout: method({ POST: [initMdmSubscriptionCheckout] }),
+    mdmSubscriptionCancel: method({ POST: [cancelMySubscription] }),
   },
 })

@@ -60,6 +60,14 @@ export async function logsHub(ctx: ServiceContext<Clients>) {
         </form>
         <span class="desc">manually capture + flush one product (open from a logged-in admin tab)</span>
       </li>
+      <li>
+        <form action="inspect" method="get">
+          <a href="inspect?productId=1">inspect</a>
+          <input name="productId" placeholder="productId" required>
+          <button type="submit">Run</button>
+        </form>
+        <span class="desc">dump the COMPLETE raw Seller Portal product JSON — check real field names/shapes before trusting the capture extraction</span>
+      </li>
     </ul>
   </div>
 

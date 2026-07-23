@@ -24,11 +24,21 @@ interface CaptureResult {
 // the classic catalog; probe common shapes and keep the raw product for
 // diagnosis until the shape is confirmed against a real seller product.
 function extractFields(product: any) {
-  const attrs: any[] = product?.attributes ?? product?.specifications ?? []
+  // The Seller Portal Catalog API returns the field as `specs` — confirmed
+  // from a real capture's rawKeys. `attributes`/`specifications` are kept as
+  // fallbacks in case the shape differs across accounts/API versions.
+  const attrs: any[] = [
+    ...(Array.isArray(product?.specs) ? product.specs : []),
+    ...(Array.isArray(product?.attributes) ? product.attributes : []),
+    ...(Array.isArray(product?.specifications) ? product.specifications : []),
+  ]
   const attr = (names: string[]) => {
     for (const a of attrs) {
-      const n = String(a?.name ?? a?.Name ?? '').toLowerCase().trim()
-      if (names.includes(n)) return a?.value ?? a?.Value ?? a?.values?.[0] ?? null
+      const n = String(a?.name ?? a?.Name ?? a?.key ?? '').toLowerCase().trim()
+      if (names.includes(n)) {
+        const v = a?.value ?? a?.Value ?? a?.values?.[0] ?? null
+        return Array.isArray(v) ? v[0] ?? null : v
+      }
     }
     return null
   }
@@ -70,7 +80,33 @@ async function captureProduct(ctx: { clients: Clients; vtex: { account: string }
     mdm: existing?.mdm ?? null,
     // compact shape sample for diagnosing the Seller Portal product structure
     rawKeys: Object.keys(product ?? {}),
-    rawAttributes: (product?.attributes ?? product?.specifications ?? []).slice(0, 20),
+    rawAttributes: [
+      ...(Array.isArray(product?.specs) ? product.specs : []),
+      ...(Array.isArray(product?.attributes) ? product.attributes : []),
+      ...(Array.isArray(product?.specifications) ? product.specifications : []),
+    ].slice(0, 20),
+  }
+
+  // Pre-validate MDM's required fields before spending a round-trip on a
+  // 422 we already know is coming. Named separately from flush_failed so
+  // "seller needs to fill in an attribute" is distinguishable at a glance
+  // from "MDM rejected/errored" in my-products and capture-events.
+  const missing: string[] = []
+  if (!fields.cas_number) missing.push('CAS Number')
+  if (!fields.hs_code) missing.push('HS Code')
+
+  if (missing.length) {
+    item.state = 'missing_required_attributes'
+    item.flushError = `Missing required attribute(s): ${missing.join(', ')}. Add them to this product in the seller catalog, then capture again.`
+    try {
+      await ctx.clients.vbase.saveJSON(QUEUE_BUCKET, key, item)
+      const index: number[] = (await ctx.clients.vbase.getJSON<number[]>(QUEUE_BUCKET, QUEUE_INDEX, true)) ?? []
+      if (!index.includes(productId)) {
+        index.unshift(productId)
+        await ctx.clients.vbase.saveJSON(QUEUE_BUCKET, QUEUE_INDEX, index)
+      }
+    } catch {}
+    return { captured: true, productId, item }
   }
 
   // Flush to MDM — the seller token binds the scope server-side; the explicit
@@ -154,6 +190,37 @@ export async function manualCapture(ctx: ServiceContext<Clients>) {
   const userToken = (ctx.vtex as any)?.adminUserAuthToken
   const result = await captureProduct(ctx as any, productId, userToken)
   ctx.body = { success: result.captured, ...result, usedUserToken: !!userToken }
+}
+
+// Inspect: GET /_v/mdm-seller/inspect?productId=1
+// Dumps the COMPLETE raw Seller Portal product JSON, unfiltered — use this to
+// see real field names/shapes (specs vs attributes vs something else) before
+// trusting extractFields()'s guesses, or to confirm a product genuinely has
+// no CAS/HS data set rather than us reading the wrong field.
+export async function inspectProduct(ctx: ServiceContext<Clients>) {
+  ctx.status = 200
+  const productId = Number((ctx.query as any).productId)
+  if (!productId) {
+    ctx.body = { success: false, error: 'productId query param is required' }
+    return
+  }
+  const userToken = (ctx.vtex as any)?.adminUserAuthToken
+  try {
+    const product = await ctx.clients.sellerCatalog.getProduct(productId, userToken)
+    ctx.body = {
+      success: true,
+      usedUserToken: !!userToken,
+      topLevelKeys: Object.keys(product ?? {}),
+      specsLength: Array.isArray(product?.specs) ? product.specs.length : 'not-an-array',
+      attributesLength: Array.isArray(product?.attributes) ? product.attributes.length : 'not-an-array',
+      product,
+    }
+  } catch (err: any) {
+    const detail = err?.response?.data
+      ? `${err.response.status}: ${JSON.stringify(err.response.data).slice(0, 300)}`
+      : err?.message
+    ctx.body = { success: false, error: 'catalog_fetch_failed', detail, usedUserToken: !!userToken }
+  }
 }
 
 // My Products: GET /_v/mdm-seller/my-products — the seller's captured queue

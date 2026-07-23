@@ -119,6 +119,30 @@ export async function getMySubscriptionInvoices(ctx: ServiceContext<Clients>) {
   }
 }
 
+// POST /_v/mdm-seller/subscription/mdm-cancel — schedules cancellation at
+// period end (never immediate). MDM handles Stripe + its own cancel_at
+// synchronously in one call; no polling or webhook wait needed on our side.
+// Idempotent on MDM's side, so a double-click just re-returns the same
+// scheduled state rather than erroring.
+export async function cancelMySubscription(ctx: ServiceContext<Clients>) {
+  ctx.status = 200
+  const token = await getSellerMdmToken(ctx)
+  if (!token) {
+    ctx.body = { success: false, error: 'MDM is not configured for this seller yet.' }
+    return
+  }
+
+  try {
+    const subscription = await ctx.clients.mdm.cancelSubscription(token, externalReferenceId(ctx))
+    ctx.body = { success: true, subscription }
+  } catch (err: any) {
+    // MDM's documented error shapes all carry a usable message (e.g. "No
+    // active subscription to cancel.", "Could not cancel: <Stripe error>")
+    // — mdmErrDetail already surfaces err.response.data.message directly.
+    ctx.body = { success: false, error: 'Failed to cancel subscription', detail: mdmErrDetail(err) }
+  }
+}
+
 // Unlike Checkout Sessions, the Subscriptions API's inline price_data only
 // accepts an existing Product id (no product_data) — so the product is
 // created once per MDM plan+billing-cycle and its id cached in VBase.

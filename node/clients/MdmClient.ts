@@ -183,6 +183,23 @@ export class MdmClient extends ExternalClient {
     return res?.data ?? res
   }
 
+  // Cancels at period end (cancel_at_period_end=true on Stripe), not
+  // immediately — access continues until the paid period ends. Synchronous:
+  // MDM calls Stripe and updates its own cancel_at before responding, so the
+  // response is already final for display, no webhook wait needed. Status
+  // stays whatever it already was (active/past_due/etc) — it only flips to
+  // "canceled" for real later, once MDM's own Stripe webhook receives
+  // customer.subscription.deleted at the actual period end. Idempotent —
+  // safe to call again if already scheduled.
+  public async cancelSubscription(token: string, externalReferenceId: string): Promise<any> {
+    const res: any = await this.http.post(
+      this.url('/subscriptions/cancel'),
+      { source: 'vtex', external_reference_id: externalReferenceId },
+      { headers: { Authorization: `Bearer ${token}` } }
+    )
+    return res?.data ?? res
+  }
+
   private url(path: string): string {
     return `${this.mdmBaseUrl}${path}`
   }

@@ -70,12 +70,20 @@
       "path": "/_v/mdm-seller/subscription/mdm-checkout",
       "public": true
     },
+    "mdmSubscriptionCancel": {
+      "path": "/_v/mdm-seller/subscription/mdm-cancel",
+      "public": true
+    },
     "logsHub": {
       "path": "/_v/mdm-seller/logs",
       "public": true
     },
     "debugAdminToken": {
       "path": "/_v/mdm-seller/debug-admin-token",
+      "public": true
+    },
+    "inspectProduct": {
+      "path": "/_v/mdm-seller/inspect",
       "public": true
     }
   },
