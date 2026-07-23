@@ -59,11 +59,18 @@ const loadStripeJs = () => new Promise((resolve, reject) => {
 })
 
 // ── Current subscription card — read straight from MDM, not Stripe/VBase ──
-const CurrentSubscriptionCard = ({ subscription }) => {
+// Three distinct states: (a) normal active — "Renews {date}" + Cancel button;
+// (b) scheduled to cancel (cancel_at set, canceled_at not) — "Cancels {date}",
+// no Cancel button since it's already scheduled; (c) fully canceled
+// (canceled_at set, status flips only later via MDM's own Stripe webhook at
+// the actual period end) — "Canceled {date}".
+const CurrentSubscriptionCard = ({ subscription, onCancel, canceling, cancelError }) => {
   const meta = STATUS_LABELS[subscription.status] ?? { label: subscription.status, color: '#6b7c93', bg: '#f7f9fa', border: '#e3e4e6' }
   // Trust status, not canceled_at — MDM may leave a stale canceled_at on an
   // active row when a subscription is reactivated rather than recreated.
   const canceled = subscription.status === 'canceled'
+  const scheduledToCancel = !canceled && !!subscription.cancel_at
+  const [confirm, setConfirm] = useState(false)
 
   return (
     <div style={{
@@ -91,13 +98,70 @@ const CurrentSubscriptionCard = ({ subscription }) => {
         </span>
       </div>
       <div style={{ fontSize: 13, color: '#666', marginBottom: 14 }}>{subscription.billing_cycle}</div>
-      <div style={{ fontSize: 12, color: canceled ? '#dc2626' : '#666' }}>
+      <div style={{ fontSize: 12, color: canceled ? '#dc2626' : scheduledToCancel ? '#b45309' : '#666', marginBottom: scheduledToCancel || (!canceled && !scheduledToCancel) ? 14 : 0 }}>
         {canceled
           ? `Canceled ${subscription.canceled_at}`
-          : subscription.current_period_end_formatted
-            ? `Renews ${subscription.current_period_end_formatted}`
-            : null}
+          : scheduledToCancel
+            ? `Cancels ${subscription.cancel_at_formatted ?? subscription.cancel_at}`
+            : subscription.current_period_end_formatted
+              ? `Renews ${subscription.current_period_end_formatted}`
+              : null}
       </div>
+
+      {!canceled && !scheduledToCancel && (
+        <div>
+          {cancelError && (
+            <div style={{ marginBottom: 10 }}><Alert type="error">{cancelError}</Alert></div>
+          )}
+          {!confirm ? (
+            <button
+              onClick={() => setConfirm(true)}
+              disabled={canceling}
+              style={{
+                background: '#fff',
+                border: '1px solid #ef4444',
+                borderRadius: 4,
+                padding: '5px 12px',
+                fontSize: 12,
+                fontWeight: 600,
+                color: '#ef4444',
+                cursor: 'pointer',
+              }}
+            >
+              Cancel subscription
+            </button>
+          ) : (
+            <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <span style={{ fontSize: 12, color: '#555' }}>
+                Cancel at the end of the current period?
+              </span>
+              <button
+                onClick={() => { setConfirm(false); onCancel() }}
+                disabled={canceling}
+                style={{
+                  background: '#dc2626',
+                  border: 'none',
+                  borderRadius: 4,
+                  padding: '5px 12px',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: '#fff',
+                  cursor: 'pointer',
+                }}
+              >
+                {canceling ? '…' : 'Confirm'}
+              </button>
+              <button
+                onClick={() => setConfirm(false)}
+                disabled={canceling}
+                style={{ background: '#fff', border: '1px solid #ccc', borderRadius: 4, padding: '5px 10px', fontSize: 12, color: '#555', cursor: 'pointer' }}
+              >
+                ✕
+              </button>
+            </span>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -565,6 +629,8 @@ const SellerSubscription = () => {
   const [invoices, setInvoices] = useState([])
   const [plans, setPlans] = useState(null)
   const [checkout, setCheckout] = useState(null) // { plan, cycle } | null
+  const [canceling, setCanceling] = useState(false)
+  const [cancelError, setCancelError] = useState(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -607,6 +673,23 @@ const SellerSubscription = () => {
 
   useEffect(() => { load() }, [load])
 
+  const handleCancel = async () => {
+    setCanceling(true)
+    setCancelError(null)
+    try {
+      const res = await fetch(`${BASE}/subscription/mdm-cancel`, { method: 'POST' })
+      const data = await parseResponse(res)
+      if (!data.success) {
+        throw new Error(data.detail ? `${data.error}: ${data.detail}` : (data.error ?? 'Failed to cancel subscription'))
+      }
+      await load()
+    } catch (err) {
+      setCancelError(err.message)
+    } finally {
+      setCanceling(false)
+    }
+  }
+
   return (
     <div className="pa6">
       <div style={{ fontSize: 28, fontWeight: 700, color: '#142032', marginBottom: 24 }}>
@@ -623,7 +706,12 @@ const SellerSubscription = () => {
         <div style={{ display: 'flex', justifyContent: 'center', padding: 48 }}><Spinner /></div>
       ) : subscription ? (
         <>
-          <CurrentSubscriptionCard subscription={subscription} />
+          <CurrentSubscriptionCard
+            subscription={subscription}
+            onCancel={handleCancel}
+            canceling={canceling}
+            cancelError={cancelError}
+          />
           {subscription.status === 'canceled' && plans?.length > 0 && (
             <div style={{ marginBottom: 28 }}>
               <div style={{ fontWeight: 700, fontSize: 16, color: '#142032', marginBottom: 4 }}>
