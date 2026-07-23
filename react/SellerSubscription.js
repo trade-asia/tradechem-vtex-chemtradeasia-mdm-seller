@@ -610,7 +610,7 @@ const SellerSubscription = () => {
   return (
     <div className="pa6">
       <div style={{ fontSize: 28, fontWeight: 700, color: '#142032', marginBottom: 24 }}>
-        Subscription
+        My Subscription
       </div>
 
       {error && (
