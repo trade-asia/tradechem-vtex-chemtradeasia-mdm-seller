@@ -60,6 +60,7 @@ Powers the **Subscription** page. This is where money actually moves for real su
 | `GET` | `/_v/mdm-seller/mdm-invoices` | `getMySubscriptionInvoices` | This seller's invoice history **from MDM** (`GET {mdmApiEndpoint}/subscriptions/invoices?source=vtex&external_reference_id=...`) — only fetched when a subscription exists |
 | `GET` | `/_v/mdm-seller/mdm-plans` | `getMySubscriptionPlans` | Available plans **from MDM** (`GET {mdmApiEndpoint}/subscriptions/plans?source=vtex`), shown when the seller has no subscription yet |
 | `POST` | `/_v/mdm-seller/subscription/mdm-checkout` | `initMdmSubscriptionCheckout` | Body: `{ planId, billingCycleId }` — **that's all the browser sends**, no email/name/amount. Re-fetches MDM's plans server-side to resolve the real price, creates a Stripe Customer + Subscription directly (Subscriptions API, not Checkout Sessions), reports it to MDM synchronously (`POST /subscriptions/events`), and returns `{ clientSecret, publishableKey, subscriptionId }` for the browser to mount the Payment Element. See [Real checkout flow](#real-checkout-flow-subscription-page) below. |
+| `POST` | `/_v/mdm-seller/subscription/mdm-cancel` | `cancelMySubscription` (`mdmSubscriptionHandler.ts`) | No body. Calls MDM's `POST {mdmApiEndpoint}/subscriptions/cancel` with `{ source: 'vtex', external_reference_id }`. Schedules cancellation at period end (never immediate) — MDM sets `cancel_at_period_end` on Stripe and its own `cancel_at` synchronously, so the response is final; no webhook wait. Idempotent — safe to call again if already scheduled. |
 
 See [Subscription (MDM-backed)](#subscription-mdm-backed) below for the full flow, architecture, and remaining open questions.
 
@@ -117,6 +118,7 @@ Base URL defaults to `https://tradeasia.exchange/api/v1` (overridable via the `m
 | `GET` | `/subscriptions/invoices?source=vtex&external_reference_id=...` | This seller's invoice history |
 | `GET` | `/subscriptions/plans?source=vtex` | Available plans + billing cycles |
 | `POST` | `/subscriptions/events` | The single ingestion endpoint for everything: new subscriptions, status updates, and the seller-profile-only sync (`customer` block, no `subscription`/`invoice`) |
+| `POST` | `/subscriptions/cancel` | Schedule cancellation at period end for `{ source, external_reference_id }`. Adds `cancel_at`/`cancel_at_formatted` to the subscription going forward (also present on `GET /subscriptions` and `GET /subscriptions/{id}` once scheduled) — `canceled_at`/status flip to `canceled` only later, via MDM's own Stripe webhook at the actual period end. |
 
 All calls carry `Authorization: Bearer {token}`. Tokens are obtained via `getMdmToken()` (`node/helpers/getMdmToken.ts`), which authenticates once and caches the token in VBase (see below), refreshing when less than 24h of validity remains, or immediately on a `401`. The three `/subscriptions/*` GET calls also pass `cacheable: CacheType.None` explicitly — see the comment in `MdmClient.ts` for why (a real incident: `@vtex/api`'s HTTP client caches GET responses by URL only, so a stale 401 got served back regardless of which token was sent afterward).
 
@@ -139,9 +141,9 @@ Removed: `mdmSellerToken` (a pre-issued, seller-scoped MDM token, preferred over
 
 **Production path:** VTEX Admin → Apps → this app → Settings, which VTEX persists and the app reads via `ctx.clients.apps.getAppSettings(appId)`.
 
-**Dev-only fallback (currently in use):** this seller edition has no Apps admin UI to reach that screen, and the app's own token can't write its own settings (`403`). `readMdmConfig()` (`node/handlers/devSettingsHandler.ts`) therefore falls back to a VBase-stored config when real settings are empty, managed via `GET`/`POST`/`DELETE` on `/_v/mdm-seller/dev/settings` (list / add-or-update-by-merge / remove-by-key). Full reference with examples: **[Dev Settings guide](user-guide/dev-settings.md)**.
+**VBase fallback (permanent, not temporary):** `@vtex/api`'s Apps client has no write method at all — confirmed from the library source, not just a 403 to work around later. So `readMdmConfig()` (`node/handlers/devSettingsHandler.ts`) falls back, in order, to: this seller's own VBase-stored config (managed via `GET`/`POST`/`DELETE` on `/_v/mdm-seller/dev/settings` — list / add-or-update-by-merge / remove-by-key), then the marketplace app's global settings (auto-fetched and cached here on first use — see [Dev Settings guide § Settings scope](user-guide/dev-settings.md#settings-scope-master-workspaces-and-multiple-sellers)). Full reference with examples: **[Dev Settings guide](user-guide/dev-settings.md)**.
 
-⚠️ The secret is hardcoded in source (`mdm-dev-2026`). Remove `devSettingsHandler.ts` and its route (`devSettings` in `service.json`) once real Settings access is available, before publishing to production.
+⚠️ The secret is hardcoded in source (`mdm-dev-2026`) — that's a known simplification for a single-vendor internal integration, not something to harden further right now.
 
 ### VBase buckets
 
@@ -210,11 +212,12 @@ Per MDM's own integration guide (`docs/vtex-subscriptions-integration-guide.html
 
 **Current scope:**
 
-1. `GET /_v/mdm-seller/mdm-subscription` → MDM's `GET /subscriptions?source=vtex&external_reference_id=...`. If found, the page shows the plan name, billing cycle, status, and renewal/cancellation date, **plus** invoice history via `GET /_v/mdm-seller/mdm-invoices` (with date/amount filters, full-width table).
+1. `GET /_v/mdm-seller/mdm-subscription` → MDM's `GET /subscriptions?source=vtex&external_reference_id=...`. If found, the page shows the plan name, billing cycle, status, and one of three date lines — `Renews {date}`, `Cancels {date}` (scheduled but still active), or `Canceled {date}` — **plus** invoice history via `GET /_v/mdm-seller/mdm-invoices` (with date/amount filters, full-width table).
 2. If MDM has no subscription for this seller, the page shows MDM's plans (`GET /_v/mdm-seller/mdm-plans`) with a working **Subscribe** button.
 3. No manual name/email/company/phone form anywhere in this flow — identity comes from the VTEX admin token, and the seller's profile is pushed into MDM proactively (see above), not typed in ad hoc.
+4. **Cancel subscription** button on an active card (two-step inline confirm) → `POST /_v/mdm-seller/subscription/mdm-cancel` → MDM's `POST /subscriptions/cancel`. Schedules cancellation at period end, never immediate; the button hides once a cancellation is already scheduled (`cancel_at` present, `canceled_at` not).
 
-**Still out of scope:** canceling or changing plans from this page, and any VTEX Admin-side (marketplace-admin, cross-seller) Subscriptions/Billing screens — seller side only, for now.
+**Still out of scope:** changing plans from this page, and any VTEX Admin-side (marketplace-admin, cross-seller) Subscriptions/Billing screens — seller side only, for now.
 
 **Open questions, updated:**
 

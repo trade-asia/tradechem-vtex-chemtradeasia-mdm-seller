@@ -15,8 +15,11 @@ You can only delete documents you uploaded yourself. Documents added by the mark
 **Q: Why doesn't Subscribe ask me for my name or email?**
 It already knows — your email comes from your VTEX admin login automatically, so there's nothing to type before payment.
 
-**Q: Can I get a refund or cancel my subscription?**
-Not from this page yet — contact the marketplace administrator.
+**Q: Can I cancel my subscription?**
+Yes — click **Cancel subscription** on your subscription card, then **Confirm**. It takes effect at the **end of your current paid period**, not immediately; you keep full access until then, and the card updates right away to show **Cancels {date}**.
+
+**Q: Can I get a refund?**
+Not from this page — contact the marketplace administrator.
 
 **Q: Is my payment information stored on this site?**
 No. Card details are entered directly into Stripe's own embedded form and never touch this application.

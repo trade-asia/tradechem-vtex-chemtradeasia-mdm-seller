@@ -1,8 +1,8 @@
 # Dev Settings (Managing App Configuration)
 
-This app's real Settings screen (**VTEX Admin → Apps → this app → Settings**) is the intended way to configure it in production. But this seller edition currently has no Apps admin UI to reach that screen, and the app's own token can't write its own settings (`403`) — so until that's available, configuration lives in **VBase** via a dev-only endpoint, and every handler that needs settings (`readMdmConfig()`) falls back to it automatically when the real settings are empty.
+This app's real Settings screen (**VTEX Admin → Apps → this app → Settings**) can still be *read* (`ctx.clients.apps.getAppSettings`), but `@vtex/api`'s Apps client exposes no way to *write* it — confirmed by reading the library's own source, not just an assumption. That's a permanent platform limitation, not a temporary gap waiting on some other feature, so — same as the marketplace app's own settings handler — actual configuration permanently lives in **VBase** via this endpoint, and every handler that needs settings (`readMdmConfig()`) falls back to it automatically when the real settings are empty. It's also where the marketplace app's [global settings](#auto-fetch-from-the-marketplace-app) get cached once fetched, so this endpoint stays load-bearing in production, not just a dev convenience.
 
-> ⚠️ **Dev only.** The endpoint is gated by a secret hardcoded in source (`mdm-dev-2026`, in `node/handlers/devSettingsHandler.ts`). Remove this handler and its route (`devSettings` in `service.json`) once real Settings access is available, before publishing to production.
+> The endpoint is gated by a secret hardcoded in source (`mdm-dev-2026`, in `node/handlers/devSettingsHandler.ts`). "Dev" describes how it's protected (a hardcoded shared secret rather than real VTEX auth), not that it's disposable — don't remove it.
 
 All requests go to:
 
@@ -79,6 +79,28 @@ curl -X POST "https://devadnan--adnnor332.myvtex.com/_v/mdm-seller/dev/settings"
 
 You only need to send the fields you're adding or changing — this **merges** into the existing saved config rather than replacing it, so anything you leave out is untouched. Response:
 
+### Minimum settings for a working test setup
+
+```sh
+curl -X POST "https://adnnor332.myvtex.com/_v/mdm-seller/dev/settings" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "secret": "mdm-dev-2026",
+    "mdmApiEndpoint": "https://tradeasia.exchange/api/v1",
+    "mdmUsername": "your-mdm-username",
+    "mdmPassword": "your-mdm-password",
+    "stripeSecretKey": "sk_test_51TvPWaPUzmnXEkZgehV5gj3L41LP0Zx8Z8cvwrMC0ycupfTWka7TiSCWSXpXTFNWCJRAeED9pEBYPp86Qn5htIkG00jH71zeCQ",
+    "stripePublishableKey": "pk_test_51TvPWaPUzmnXEkZgbyr4UlyWK2Chm5bieaRSYdZunCTXWzdmuRugwQ5Gk4biP2aCfEuFZ87koJDohaB6yYrWS1Y500j3Q8kPNc",
+    "stripeWebhookSecret": "whsec_LEjgEEHTcOwpawINMaVLKxpmlKdsXp3h",
+    "stripeMonthlyAmountUsd": "25",
+    "stripeYearlyAmountUsd": "250"
+  }'
+```
+
+> ⚠️ **These Stripe keys and webhook secret are Test-mode defaults for this project** — no real money moves through them, but they are still live credentials. Replace `stripeSecretKey`/`stripePublishableKey` with your own `sk_live_...`/`pk_live_...` pair before accepting real payments, and treat `mdmUsername`/`mdmPassword` (never shared here — always your own) the same way. You shouldn't normally need to run this per seller anymore — see [Settings scope: master, workspaces, and multiple sellers](#settings-scope-master-workspaces-and-multiple-sellers) below for the auto-fetch mechanism that populates new seller accounts automatically.
+>
+> `stripeWebhookSecret` above (`whsec_LEjgE...`) is **our own** webhook (Embed Demo's status badge only) pointed at `/_v/mdm-seller/subscription/webhook`. MDM's own separate webhook — `https://tradeasia.exchange/api/v1/subscriptions/stripe-webhook` — uses a different signing secret (`whsec_pbGABiqIfgC1K5apX1QLRL0WxoGUD60g`) that **MDM holds and configures on their own side**; it is not something you set here, listed only for reference. See [README § Configuring the webhooks](../README.md#configuring-the-webhooks).
+
 ```json
 { "success": true, "updated": ["stripeSecretKey", "stripeWebhookSecret", ...], "allKeys": [...] }
 ```
@@ -123,6 +145,36 @@ Removes just the listed keys; everything else stays as-is. Response:
 If `stripeSecretKey`/`stripePublishableKey` are `sk_test_...`/`pk_test_...` (sandbox keys), no real card or money is involved. Use one of [Stripe's test cards](https://docs.stripe.com/testing) on any Subscription/Embed Demo page — the simplest is `4242 4242 4242 4242`, any future expiry date, any 3-digit CVC, any postal code.
 
 ---
+
+## Settings scope: master, workspaces, and multiple sellers
+
+These settings are saved in **VBase**, which scopes data to whichever VTEX account + workspace made the request. Two things follow from that:
+
+- **Linked workspace vs. `master`.** Settings saved while linked (e.g. `https://devadnan--adnnor332.myvtex.com/...`) live only in that dev workspace's VBase — they do **not** carry over once the app is published and running on `master` (`https://adnnor332.myvtex.com/...`, no workspace prefix). If you configured settings only on a dev workspace and then publish, you need to POST them again against the `master`-style URL.
+- **Multiple sellers.** Every seller runs this app on their *own* separate VTEX account (which is what lets `external_reference_id` — set to `ctx.vtex.account` — uniquely identify each seller to MDM), so settings are never automatically shared between accounts at the VBase level — each seller's account has its own independent VBase.
+
+### Auto-fetch from the marketplace app
+
+You no longer need to manually POST these settings to every seller account. `readMdmConfig()` (in `devSettingsHandler.ts`) now falls back, in order:
+
+1. Real VTEX Settings for this seller's own account (if ever filled in)
+2. This seller's own local VBase (whatever was POSTed here directly)
+3. **The marketplace app's global settings** — `tradechem-vtex-chemtradeasia-mdm` is the single source of truth for values that are identical across every seller (MDM login, Stripe platform keys). The first time a seller account has nothing saved locally, this app calls that app's `GET /_v/chemtradeasia-mdm/global-settings` (a machine-only endpoint, gated by its own shared secret — see that app's [06 — App Settings § Sharing settings with the seller app](../../tradechem-vtex-chemtradeasia-mdm/user-guide/06-app-settings.md#sharing-settings-with-the-seller-app)) and **caches the result into this seller's own VBase**, so it's a one-time network hop per seller account, not a per-request one.
+
+In practice this means: onboarding a new seller now needs **zero manual settings setup** as long as the marketplace app has its global config filled in — it self-populates on first use.
+
+**Forcing a re-fetch** (e.g. after MDM/Stripe credentials were rotated centrally): clear this seller's cached copy so the next request re-pulls the current global values.
+
+```sh
+curl -X DELETE "https://adnnor332.myvtex.com/_v/mdm-seller/dev/settings" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "secret": "mdm-dev-2026",
+    "keys": ["mdmApiEndpoint", "mdmUsername", "mdmPassword", "stripeSecretKey", "stripePublishableKey", "stripeWebhookSecret"]
+  }'
+```
+
+The manual per-seller POST (documented above) still works and still takes precedence — use it if a specific seller genuinely needs a different value than everyone else.
 
 ## Diagnostics
 

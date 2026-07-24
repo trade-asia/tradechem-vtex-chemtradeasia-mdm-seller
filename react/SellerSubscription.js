@@ -64,13 +64,12 @@ const loadStripeJs = () => new Promise((resolve, reject) => {
 // no Cancel button since it's already scheduled; (c) fully canceled
 // (canceled_at set, status flips only later via MDM's own Stripe webhook at
 // the actual period end) — "Canceled {date}".
-const CurrentSubscriptionCard = ({ subscription, onCancel, canceling, cancelError }) => {
+const CurrentSubscriptionCard = ({ subscription, onOpenCancel }) => {
   const meta = STATUS_LABELS[subscription.status] ?? { label: subscription.status, color: '#6b7c93', bg: '#f7f9fa', border: '#e3e4e6' }
   // Trust status, not canceled_at — MDM may leave a stale canceled_at on an
   // active row when a subscription is reactivated rather than recreated.
   const canceled = subscription.status === 'canceled'
   const scheduledToCancel = !canceled && !!subscription.cancel_at
-  const [confirm, setConfirm] = useState(false)
 
   return (
     <div style={{
@@ -109,60 +108,78 @@ const CurrentSubscriptionCard = ({ subscription, onCancel, canceling, cancelErro
       </div>
 
       {!canceled && !scheduledToCancel && (
-        <div>
-          {cancelError && (
-            <div style={{ marginBottom: 10 }}><Alert type="error">{cancelError}</Alert></div>
-          )}
-          {!confirm ? (
-            <button
-              onClick={() => setConfirm(true)}
-              disabled={canceling}
-              style={{
-                background: '#fff',
-                border: '1px solid #ef4444',
-                borderRadius: 4,
-                padding: '5px 12px',
-                fontSize: 12,
-                fontWeight: 600,
-                color: '#ef4444',
-                cursor: 'pointer',
-              }}
-            >
-              Cancel subscription
-            </button>
-          ) : (
-            <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <span style={{ fontSize: 12, color: '#555' }}>
-                Cancel at the end of the current period?
-              </span>
-              <button
-                onClick={() => { setConfirm(false); onCancel() }}
-                disabled={canceling}
-                style={{
-                  background: '#dc2626',
-                  border: 'none',
-                  borderRadius: 4,
-                  padding: '5px 12px',
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: '#fff',
-                  cursor: 'pointer',
-                }}
-              >
-                {canceling ? '…' : 'Confirm'}
-              </button>
-              <button
-                onClick={() => setConfirm(false)}
-                disabled={canceling}
-                style={{ background: '#fff', border: '1px solid #ccc', borderRadius: 4, padding: '5px 10px', fontSize: 12, color: '#555', cursor: 'pointer' }}
-              >
-                ✕
-              </button>
-            </span>
-          )}
-        </div>
+        <button
+          onClick={onOpenCancel}
+          style={{
+            background: '#fff',
+            border: '1px solid #ef4444',
+            borderRadius: 4,
+            padding: '5px 12px',
+            fontSize: 12,
+            fontWeight: 600,
+            color: '#ef4444',
+            cursor: 'pointer',
+          }}
+        >
+          Cancel subscription
+        </button>
       )}
     </div>
+  )
+}
+
+// ── Cancel confirmation popup: confirm -> canceling -> done, with the
+// cancellation date only revealed once it's actually scheduled (not
+// pre-announced in the confirmation question itself). ──
+const CancelSubscriptionModal = ({ subscription, onSubmit, onClose, onCanceled }) => {
+  const [phase, setPhase] = useState('confirm') // 'confirm' | 'canceling' | 'done'
+  const [error, setError] = useState(null)
+  const [result, setResult] = useState(null)
+
+  const handleConfirm = async () => {
+    setPhase('canceling')
+    setError(null)
+    try {
+      const sub = await onSubmit()
+      setResult(sub)
+      setPhase('done')
+    } catch (err) {
+      setError(err.message)
+      setPhase('confirm')
+    }
+  }
+
+  return (
+    <Modal isOpen centered onClose={onClose} title={phase === 'done' ? 'Subscription canceled' : 'Cancel subscription'}>
+      <div style={{ width: '100%' }}>
+        {phase === 'done' ? (
+          <>
+            <div style={{ fontSize: 13, color: '#333', marginBottom: 18 }}>
+              Your subscription will remain active until{' '}
+              <strong>{result?.cancel_at_formatted ?? result?.cancel_at ?? 'the end of your current period'}</strong>, then it will end.
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <Button variation="primary" onClick={onCanceled}>Done</Button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ fontSize: 13, color: '#333', marginBottom: 16 }}>
+              Are you sure you want to cancel your <strong>{subscription.plan}</strong> subscription? This cannot be undone.
+            </div>
+
+            {error && <div style={{ marginBottom: 14 }}><Alert type="error">{error}</Alert></div>}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <Button variation="tertiary" onClick={onClose} disabled={phase === 'canceling'}>Keep subscription</Button>
+              <Button variation="danger" onClick={handleConfirm} isLoading={phase === 'canceling'}>
+                Cancel subscription
+              </Button>
+            </div>
+          </>
+        )}
+      </div>
+    </Modal>
   )
 }
 
@@ -629,8 +646,7 @@ const SellerSubscription = () => {
   const [invoices, setInvoices] = useState([])
   const [plans, setPlans] = useState(null)
   const [checkout, setCheckout] = useState(null) // { plan, cycle } | null
-  const [canceling, setCanceling] = useState(false)
-  const [cancelError, setCancelError] = useState(null)
+  const [cancelModalOpen, setCancelModalOpen] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -673,21 +689,13 @@ const SellerSubscription = () => {
 
   useEffect(() => { load() }, [load])
 
-  const handleCancel = async () => {
-    setCanceling(true)
-    setCancelError(null)
-    try {
-      const res = await fetch(`${BASE}/subscription/mdm-cancel`, { method: 'POST' })
-      const data = await parseResponse(res)
-      if (!data.success) {
-        throw new Error(data.detail ? `${data.error}: ${data.detail}` : (data.error ?? 'Failed to cancel subscription'))
-      }
-      await load()
-    } catch (err) {
-      setCancelError(err.message)
-    } finally {
-      setCanceling(false)
+  const submitCancel = async () => {
+    const res = await fetch(`${BASE}/subscription/mdm-cancel`, { method: 'POST' })
+    const data = await parseResponse(res)
+    if (!data.success) {
+      throw new Error(data.detail ? `${data.error}: ${data.detail}` : (data.error ?? 'Failed to cancel subscription'))
     }
+    return data.subscription
   }
 
   return (
@@ -708,9 +716,7 @@ const SellerSubscription = () => {
         <>
           <CurrentSubscriptionCard
             subscription={subscription}
-            onCancel={handleCancel}
-            canceling={canceling}
-            cancelError={cancelError}
+            onOpenCancel={() => setCancelModalOpen(true)}
           />
           {subscription.status === 'canceled' && plans?.length > 0 && (
             <div style={{ marginBottom: 28 }}>
@@ -741,6 +747,15 @@ const SellerSubscription = () => {
           cycle={checkout.cycle}
           onClose={() => setCheckout(null)}
           onSubscribed={() => { setCheckout(null); load() }}
+        />
+      )}
+
+      {cancelModalOpen && subscription && (
+        <CancelSubscriptionModal
+          subscription={subscription}
+          onSubmit={submitCancel}
+          onClose={() => setCancelModalOpen(false)}
+          onCanceled={() => { setCancelModalOpen(false); load() }}
         />
       )}
     </div>

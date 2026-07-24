@@ -111,7 +111,7 @@ export async function logsHub(ctx: ServiceContext<Clients>) {
           <input name="secret" placeholder="secret" type="password" required>
           <button type="submit">View</button>
         </form>
-        <span class="desc">saved dev config — sensitive values masked; POST to update, DELETE to remove keys</span>
+        <span class="desc">saved dev config — sensitive values masked; POST to update, DELETE to remove keys. If this comes back empty, readMdmConfig() auto-fetches from the marketplace app's global-settings endpoint on the next request and caches it here — see <a href="${MARKETPLACE_HOST}/_v/chemtradeasia-mdm/logs">marketplace app's hub</a> → Settings API</span>
       </li>
     </ul>
   </div>

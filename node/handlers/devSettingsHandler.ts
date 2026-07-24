@@ -1,6 +1,22 @@
 import { ServiceContext } from '@vtex/api'
+import axios from 'axios'
 import { Clients } from '../clients'
 import { readBody } from '../helpers/readBody'
+
+// Global config source: tradechem-vtex-chemtradeasia-mdm (the marketplace
+// app) is the single source of truth for values shared across every seller
+// (MDM login, Stripe platform keys) — see its node/handlers/mdmSettingsHandler.ts.
+// Secret below must match GLOBAL_SETTINGS_SECRET there exactly.
+const GLOBAL_SETTINGS_URL = 'https://tradeasiab2b.myvtex.com/_v/chemtradeasia-mdm/global-settings'
+const GLOBAL_SETTINGS_SECRET = 'mdm-global-settings-x7Qp2Lr9Vt4Kf8Zn'
+
+async function fetchGlobalMdmSettings(): Promise<any | null> {
+  const res = await axios.get(GLOBAL_SETTINGS_URL, {
+    headers: { 'x-global-settings-secret': GLOBAL_SETTINGS_SECRET },
+    timeout: 8000,
+  })
+  return res.data?.success ? res.data.settings : null
+}
 
 // ⚠️ DEV ONLY — remove this handler and its route before `vtex publish`.
 // Toolbelt 4.x dropped `vtex settings set` and the slim seller edition has no
@@ -116,7 +132,8 @@ export async function getSellerMdmToken(ctx: any): Promise<string | null> {
   return null
 }
 
-// Reads app settings, falling back to the VBase dev config
+// Reads app settings, falling back to the VBase dev config, falling back to
+// the marketplace app's global settings (fetched once, then cached locally).
 export async function readMdmConfig(ctx: ServiceContext<Clients>): Promise<any> {
   const appId = process.env.VTEX_APP_ID!
   let settings: any = {}
@@ -127,6 +144,19 @@ export async function readMdmConfig(ctx: ServiceContext<Clients>): Promise<any> 
   try {
     const devConfig = await ctx.clients.vbase.getJSON<any>(DEV_CONFIG_BUCKET, DEV_CONFIG_KEY, true)
     if (devConfig?.mdmUsername) return devConfig
+  } catch {}
+
+  // Nothing usable locally yet — pull the shared config from the marketplace
+  // app and cache it, so this cross-account call only happens once per
+  // seller account rather than on every request. If the marketplace app is
+  // briefly unreachable, this just falls through to the empty settings
+  // below rather than blocking the request.
+  try {
+    const globalConfig = await fetchGlobalMdmSettings()
+    if (globalConfig?.mdmUsername) {
+      await ctx.clients.vbase.saveJSON(DEV_CONFIG_BUCKET, DEV_CONFIG_KEY, globalConfig)
+      return globalConfig
+    }
   } catch {}
 
   return settings ?? {}

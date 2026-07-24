@@ -16,7 +16,7 @@ Open it directly in a browser tab (needs to be a tab where you're logged into th
 | **Seller-Scoped MDM Data** | `products` (this seller's MDM product feed), `countries` |
 | **Documents API** | Reference for the endpoints behind the Documents admin page |
 | **Subscriptions** | `subscription/status`, `mdm-subscription`, `mdm-plans`, `mdm-invoices`, and reference links for the checkout/webhook POST routes |
-| **Config (dev only)** | A quick form to view `dev/settings` (paste the dev secret, no need to hand-build the curl command — see [Dev Settings](dev-settings.md) for the full read/write/delete reference) |
+| **Config (dev only)** | A quick form to view `dev/settings` (paste the dev secret, no need to hand-build the curl command — see [Dev Settings](dev-settings.md) for the full read/write/delete reference). If empty, it auto-populates from the marketplace app's global settings on the next request — see [Dev Settings § Settings scope](dev-settings.md#settings-scope-master-workspaces-and-multiple-sellers) |
 | **Marketplace App** | Links out to `chemtradeasia-mdm`'s own logs hub and catalog-sync diagnostics (different app, different host — see that app's own docs) |
 | **MDM Backend** | A link to MDM's own live server log viewer — first stop for any raw `"Server error."` response, since that means the failure happened on MDM's side, not ours |
 
