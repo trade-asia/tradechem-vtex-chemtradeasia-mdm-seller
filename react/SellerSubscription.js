@@ -187,24 +187,28 @@ const CancelSubscriptionModal = ({ subscription, onSubmit, onClose, onCanceled }
 const InvoicesTable = ({ invoices }) => {
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
-  const [amountMin, setAmountMin] = useState('')
-  const [amountMax, setAmountMax] = useState('')
+  const [amountSort, setAmountSort] = useState('') // '' | 'desc' | 'asc'
 
   const filtered = useMemo(() => {
-    return invoices.filter(inv => {
+    const result = invoices.filter(inv => {
       const chargedAt = inv.charged_at ? inv.charged_at.slice(0, 10) : null
       if (dateFrom && (!chargedAt || chargedAt < dateFrom)) return false
       if (dateTo && (!chargedAt || chargedAt > dateTo)) return false
 
-      const amount = Number(inv.amount)
-      if (amountMin && !(amount >= Number(amountMin))) return false
-      if (amountMax && !(amount <= Number(amountMax))) return false
-
       return true
     })
-  }, [invoices, dateFrom, dateTo, amountMin, amountMax])
 
-  const hasFilters = dateFrom || dateTo || amountMin || amountMax
+    if (amountSort) {
+      result.sort((a, b) => {
+        const diff = Number(a.amount) - Number(b.amount)
+        return amountSort === 'desc' ? -diff : diff
+      })
+    }
+
+    return result
+  }, [invoices, dateFrom, dateTo, amountSort])
+
+  const hasFilters = dateFrom || dateTo || amountSort
 
   return (
     <div>
@@ -220,16 +224,16 @@ const InvoicesTable = ({ invoices }) => {
           <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={inputStyle} />
         </div>
         <div>
-          <div style={{ fontSize: 11, color: '#666', marginBottom: 4 }}>Min amount</div>
-          <input type="number" placeholder="0" min="0" value={amountMin} onChange={e => setAmountMin(e.target.value)} style={{ ...inputStyle, width: 90 }} />
-        </div>
-        <div>
-          <div style={{ fontSize: 11, color: '#666', marginBottom: 4 }}>Max amount</div>
-          <input type="number" placeholder="Any" min="0" value={amountMax} onChange={e => setAmountMax(e.target.value)} style={{ ...inputStyle, width: 90 }} />
+          <div style={{ fontSize: 11, color: '#666', marginBottom: 4 }}>Amount</div>
+          <select value={amountSort} onChange={e => setAmountSort(e.target.value)} style={{ ...inputStyle, width: 150 }}>
+            <option value="">Default order</option>
+            <option value="desc">Highest to lowest</option>
+            <option value="asc">Lowest to highest</option>
+          </select>
         </div>
         {hasFilters && (
           <button
-            onClick={() => { setDateFrom(''); setDateTo(''); setAmountMin(''); setAmountMax('') }}
+            onClick={() => { setDateFrom(''); setDateTo(''); setAmountSort('') }}
             style={{
               border: '1px solid #d0d5dd',
               background: '#fff',
