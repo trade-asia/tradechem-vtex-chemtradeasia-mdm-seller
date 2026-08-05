@@ -52,6 +52,7 @@ export async function logsHub(ctx: ServiceContext<Clients>) {
       <li><a href="capture-events">capture-events</a><span class="desc">broadcaster events received + capture/flush outcome per event</span></li>
       <li><a href="my-products">my-products</a><span class="desc">captured seller products with state (pending_approval / flush_failed + MDM error)</span></li>
       <li><a href="debug-admin-token">debug-admin-token</a><span class="desc">is an admin session present on this request? expiry countdown — the credential /capture uses</span></li>
+      <li><a href="touch-login">touch-login</a><span class="desc">force-syncs this seller with MDM right now (email + last_login) — called automatically on mount by every React admin page, since VTEX gives this app no real login webhook to hook into</span></li>
       <li>
         <form action="capture" method="get">
           <a href="capture?productId=1">capture</a>
@@ -137,6 +138,13 @@ export async function logsHub(ctx: ServiceContext<Clients>) {
           <button type="submit">Sweep</button>
         </form>
         <span class="desc">backfill sweep over a product-id range (max 50 per call)</span>
+      </li>
+      <li>
+        <form action="${MARKETPLACE_HOST}/_v/chemtradeasia-mdm/sync-all-sellers" method="get">
+          <a>sync-all-sellers</a>
+          <button type="submit">Run</button>
+        </form>
+        <span class="desc">bulk-syncs every registered seller (this one included) with MDM, sending real email + first/last name from seller-register</span>
       </li>
     </ul>
   </div>
