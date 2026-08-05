@@ -644,6 +644,10 @@ const PlanSelection = ({ plans, onSelect }) => {
 // existing subscription. If found, shows it plus invoice history. If not,
 // shows MDM's available plans — selection isn't wired to checkout yet.
 const SellerSubscription = () => {
+  // Touches last_login in MDM once per page open — the closest proxy to
+  // "seller logged in" VTEX gives this app (no real login webhook exists).
+  useEffect(() => { fetch(`${BASE}/touch-login`).catch(() => {}) }, [])
+
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [subscription, setSubscription] = useState(null)

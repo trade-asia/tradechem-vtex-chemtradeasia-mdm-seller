@@ -82,6 +82,10 @@
       "path": "/_v/mdm-seller/debug-admin-token",
       "public": true
     },
+    "touchSellerLogin": {
+      "path": "/_v/mdm-seller/touch-login",
+      "public": true
+    },
     "inspectProduct": {
       "path": "/_v/mdm-seller/inspect",
       "public": true

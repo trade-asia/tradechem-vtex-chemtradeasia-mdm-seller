@@ -8,6 +8,7 @@ import { createSubscriptionCheckout, stripeWebhookHandler, getSubscriptionStatus
 import { getMySubscription, getMySubscriptionPlans, getMySubscriptionInvoices, initMdmSubscriptionCheckout, cancelMySubscription } from './handlers/mdmSubscriptionHandler'
 import { logsHub } from './handlers/logsHubHandler'
 import { debugAdminToken } from './handlers/debugAdminTokenHandler'
+import { touchSellerLogin } from './handlers/sellerLoginHandler'
 
 declare global {
   type Context = ServiceContext<Clients, State>
@@ -49,6 +50,7 @@ export default new Service<Clients, State, ParamsContext>({
     mdmSubscriptionInvoices: method({ GET: [getMySubscriptionInvoices] }),
     logsHub: method({ GET: [logsHub] }),
     debugAdminToken: method({ GET: [debugAdminToken] }),
+    touchSellerLogin: method({ GET: [touchSellerLogin] }),
     mdmSubscriptionCheckout: method({ POST: [initMdmSubscriptionCheckout] }),
     mdmSubscriptionCancel: method({ POST: [cancelMySubscription] }),
   },

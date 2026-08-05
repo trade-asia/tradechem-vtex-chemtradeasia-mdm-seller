@@ -44,6 +44,10 @@ const loadStripeJs = () => new Promise((resolve, reject) => {
 })
 
 const SellerSubscriptionEmbed = () => {
+  // Touches last_login in MDM once per page open — the closest proxy to
+  // "seller logged in" VTEX gives this app (no real login webhook exists).
+  useEffect(() => { fetch(`${BASE}/touch-login`).catch(() => {}) }, [])
+
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
   const [subscription, setSubscription] = useState(null)

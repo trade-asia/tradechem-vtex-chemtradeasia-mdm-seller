@@ -398,6 +398,10 @@ const DocRow = ({ doc, idx, onDelete, deletingId }) => {
 
 /* ── Main page ── */
 const SellerDocuments = () => {
+  // Touches last_login in MDM once per page open — the closest proxy to
+  // "seller logged in" VTEX gives this app (no real login webhook exists).
+  useEffect(() => { fetch(`${BASE}/touch-login`).catch(() => {}) }, [])
+
   // Product picker
   const [query, setQuery] = useState('')
   const [skuQuery, setSkuQuery] = useState('')
