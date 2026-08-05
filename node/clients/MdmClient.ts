@@ -86,6 +86,23 @@ export class MdmClient extends ExternalClient {
     }
   }
 
+  // POST /vtex/sellers/sync — per MDM's integration instructions, call this
+  // on every seller login (best-effort proxy here: before any product push,
+  // re-synced periodically — see ensureSellerSynced() in
+  // productCaptureHandler.ts, since this app has no real "login" webhook to
+  // hook into). Returns MDM's own internal seller id (data.id), which must
+  // be sent as mdm_seller_id on every subsequent product push — a push for
+  // a seller that's never been synced is rejected with 422.
+  public async syncSeller(
+    token: string,
+    payload: { vtex_seller_id?: string; email?: string; first_name?: string; last_name?: string; logo?: string }
+  ): Promise<any> {
+    const res: any = await this.http.post(this.url('/vtex/sellers/sync'), payload, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    return res?.data ?? res
+  }
+
   // POST /vtex/products — with a seller token the scope is bound server-side;
   // vtex_seller_id in the payload must match (or be used by admin-cred fallback)
   public async upsertProduct(token: string, payload: any): Promise<any> {

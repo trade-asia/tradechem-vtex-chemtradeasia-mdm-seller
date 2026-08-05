@@ -1,7 +1,7 @@
 {
   "vendor": "tradeasiab2b",
   "name": "chemtradeasia-mdm-seller",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "title": "MDM Seller",
   "description": "Seller-facing MDM features: manage your own SDS / TDS / MSDS documents, with room for future MDM seller tools.",
   "defaultLocale": "en-US",
