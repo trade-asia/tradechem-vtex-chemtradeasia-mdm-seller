@@ -6,9 +6,5 @@
   "admin.app.mdm-seller-subscription": {
     "component": "SellerSubscription",
     "path": "/admin/app/mdm-seller/subscription"
-  },
-  "admin.app.mdm-seller-subscription-embed": {
-    "component": "SellerSubscriptionEmbed",
-    "path": "/admin/app/mdm-seller/subscription-embed"
   }
 }

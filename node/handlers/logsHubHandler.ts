@@ -97,7 +97,6 @@ export async function logsHub(ctx: ServiceContext<Clients>) {
       <li><a href="mdm-plans">mdm-plans</a><span class="desc">available plans</span></li>
       <li><a href="mdm-invoices">mdm-invoices</a><span class="desc">invoice history</span></li>
       <li><span class="m post">POST</span><a>subscription/checkout</a><span class="desc">create a Stripe checkout session</span></li>
-      <li><span class="m post">POST</span><a>subscription/embed/init</a><span class="desc">init embedded Stripe checkout</span></li>
       <li><span class="m post">POST</span><a>subscription/mdm-checkout</a><span class="desc">init MDM-side subscription checkout</span></li>
       <li><span class="m post">POST</span><a>subscription/webhook</a><span class="desc">Stripe webhook receiver (Stripe calls this, not you)</span></li>
     </ul>

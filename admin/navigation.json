@@ -10,10 +10,6 @@
       {
         "labelId": "mdm-seller.navigation.subscription",
         "path": "/admin/mdm-seller/subscription"
-      },
-      {
-        "labelId": "mdm-seller.navigation.subscriptionEmbed",
-        "path": "/admin/mdm-seller/subscription-embed"
       }
     ]
   }

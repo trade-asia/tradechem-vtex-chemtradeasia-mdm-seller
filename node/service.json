@@ -50,10 +50,6 @@
       "path": "/_v/mdm-seller/subscription/status",
       "public": true
     },
-    "subscriptionEmbedInit": {
-      "path": "/_v/mdm-seller/subscription/embed/init",
-      "public": true
-    },
     "mdmSubscription": {
       "path": "/_v/mdm-seller/mdm-subscription",
       "public": true
