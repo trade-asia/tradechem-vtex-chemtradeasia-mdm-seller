@@ -13,6 +13,14 @@ const QUEUE_INDEX = 'index'
 const EVENT_LOG_KEY = 'event-log'
 const EVENT_LOG_MAX = 30
 
+// Temporary: product creation moved to marketplace-admin-only (they create
+// or link the product in their own catalog, which is what pushes to MDM
+// now — see catalogSyncHandler.ts in the marketplace app). This app's own
+// direct push is paused to avoid duplicating that same product into MDM a
+// second time. Captures still get recorded locally either way — see the
+// PAUSE_MDM_PUSH check below.
+const PAUSE_MDM_PUSH = true
+
 interface CaptureResult {
   captured: boolean
   productId?: number
@@ -99,6 +107,29 @@ async function captureProduct(ctx: { clients: Clients; vtex: { account: string }
   if (missing.length) {
     item.state = 'missing_required_attributes'
     item.flushError = `Missing required attribute(s): ${missing.join(', ')}. Add them to this product in the seller catalog, then capture again.`
+    try {
+      await ctx.clients.vbase.saveJSON(QUEUE_BUCKET, key, item)
+      const index: number[] = (await ctx.clients.vbase.getJSON<number[]>(QUEUE_BUCKET, QUEUE_INDEX, true)) ?? []
+      if (!index.includes(productId)) {
+        index.unshift(productId)
+        await ctx.clients.vbase.saveJSON(QUEUE_BUCKET, QUEUE_INDEX, index)
+      }
+    } catch {}
+    return { captured: true, productId, item }
+  }
+
+  // Paused: product creation now goes through the marketplace admin, who
+  // either creates a new product or links to an existing one in their own
+  // catalog — that marketplace-side action is what pushes to MDM (with
+  // proper seller attribution, since catalogSyncHandler.ts already resolves
+  // it from SkuSellers). This app pushing the same product independently on
+  // top of that would create a duplicate MDM record for the same real
+  // product — exactly the class of bug already fixed once this session.
+  // Still captured/tracked locally so nothing about the product is lost;
+  // just not sent to MDM. Flip PAUSE_MDM_PUSH to resume if this changes.
+  if (PAUSE_MDM_PUSH) {
+    item.state = 'paused_admin_managed'
+    item.flushError = 'Not pushed to MDM — product creation now goes through the marketplace admin (they create or link this product in their own catalog, which pushes to MDM with the seller attribution attached). Ask your marketplace admin to create/link this product if it hasn\'t been picked up yet.'
     try {
       await ctx.clients.vbase.saveJSON(QUEUE_BUCKET, key, item)
       const index: number[] = (await ctx.clients.vbase.getJSON<number[]>(QUEUE_BUCKET, QUEUE_INDEX, true)) ?? []
