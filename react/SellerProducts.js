@@ -633,10 +633,16 @@ const SellerProducts = () => {
               </div>
               <div>
                 <button
-                  onClick={() => setMediaProduct(p)}
+                  onClick={() => p.vtex?.linked && setMediaProduct(p)}
+                  disabled={!p.vtex?.linked}
+                  title={p.vtex?.linked ? undefined : 'Link this product to VTEX first — MDM’s media API needs a VTEX product ID to attach images to.'}
                   style={{
-                    background: '#fff', border: '1px solid #9333ea', borderRadius: 4, padding: '3px 10px',
-                    fontSize: 11, fontWeight: 600, color: '#9333ea', cursor: 'pointer',
+                    background: '#fff',
+                    border: `1px solid ${p.vtex?.linked ? '#9333ea' : '#ccc'}`,
+                    borderRadius: 4, padding: '3px 10px',
+                    fontSize: 11, fontWeight: 600,
+                    color: p.vtex?.linked ? '#9333ea' : '#999',
+                    cursor: p.vtex?.linked ? 'pointer' : 'not-allowed',
                   }}
                 >
                   Media
