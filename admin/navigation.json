@@ -4,6 +4,10 @@
     "titleId": "mdm-seller.navigation.label",
     "subSectionItems": [
       {
+        "labelId": "mdm-seller.navigation.products",
+        "path": "/admin/mdm-seller/products"
+      },
+      {
         "labelId": "mdm-seller.navigation.documents",
         "path": "/admin/mdm-seller/documents"
       },

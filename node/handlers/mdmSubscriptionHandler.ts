@@ -350,6 +350,18 @@ export async function initMdmSubscriptionCheckout(ctx: ServiceContext<Clients>) 
       subscriptionId: subscription.id,
     }
   } catch (err: any) {
-    ctx.body = { success: false, error: 'Failed to start checkout', detail: err?.message }
+    // A seller saw a bare "Failed to start checkout" with no detail TWICE —
+    // once before this fallback chain existed, and once after, because the
+    // first version's own last resort (JSON.stringify(err)) is worthless
+    // when err is nullish: JSON.stringify(undefined) returns the literal
+    // value undefined, not a string, so the whole chain still collapsed to
+    // nothing whenever the thrown value itself was undefined/null (e.g. a
+    // rejected Promise with no reason) rather than a proper Error. String()
+    // can't do that — String(undefined) === 'undefined', String(null) ===
+    // 'null', both non-empty — so it's now the guaranteed-non-empty last
+    // resort, after still preferring the more readable fields when present.
+    const detail = err?.message || err?.type || err?.code || err?.raw?.message || String(err)
+    console.error('[mdmSubscriptionHandler] checkout failed:', detail, err?.type, err?.code)
+    ctx.body = { success: false, error: 'Failed to start checkout', detail }
   }
 }

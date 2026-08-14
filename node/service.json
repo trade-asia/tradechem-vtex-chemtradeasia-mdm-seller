@@ -14,6 +14,22 @@
       "path": "/_v/mdm-seller/countries",
       "public": true
     },
+    "sellerProductsList": {
+      "path": "/_v/mdm-seller/products-list",
+      "public": true
+    },
+    "sellerProductMedia": {
+      "path": "/_v/mdm-seller/products/media",
+      "public": true
+    },
+    "sellerProductsImport": {
+      "path": "/_v/mdm-seller/products/import",
+      "public": true
+    },
+    "sellerProductMediaServe": {
+      "path": "/_v/mdm-seller/media",
+      "public": true
+    },
     "sellerDocuments": {
       "path": "/_v/mdm-seller/documents",
       "public": true
@@ -84,6 +100,10 @@
     },
     "inspectProduct": {
       "path": "/_v/mdm-seller/inspect",
+      "public": true
+    },
+    "sellerAccount": {
+      "path": "/_v/mdm-seller/account",
       "public": true
     }
   },

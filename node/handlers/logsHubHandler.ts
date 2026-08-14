@@ -75,8 +75,20 @@ export async function logsHub(ctx: ServiceContext<Clients>) {
   <div class="card">
     <h2>Seller-Scoped MDM Data</h2>
     <ul>
-      <li><a href="products">products</a><span class="desc">this seller's product feed from MDM (backs the Documents picker)</span></li>
+      <li><a href="products">products</a><span class="desc">this seller's product feed from MDM (backs the Documents picker) — vtex_linked=1 only, keyed by vtex_seller_id</span></li>
       <li><a href="countries">countries</a><span class="desc">country list for the origins multi-select</span></li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>Products API (used by the Products admin page)</h2>
+    <ul>
+      <li><a href="products-list">products-list</a><span class="desc">this seller's full product list from MDM — filters: name, sku, cas_number, hs_code, status, vtex_linked; scoped by mdm_seller_id (not vtex_linked-restricted, unlike the Documents-picker "products" endpoint above)</span></li>
+      <li><span class="m get">GET</span><a href="products/media?vtexProductId=43">products/media?vtexProductId=…</a><span class="desc">list a product's images</span></li>
+      <li><span class="m post">POST</span><a>products/media?vtexProductId=…</a><span class="desc">multipart {file}, max 4MB — self-hosts via VBase + the media route below, then hands MDM the resulting URL (MDM's media endpoint is URL-based, not raw-upload; VTEX's own File Manager 404s "Loja não encontrada" on this Seller Portal account — no site configured)</span></li>
+      <li><a href="media?key=example">media?key=…</a><span class="desc">serves back an image stored by products/media above — this is the URL MDM actually fetches, public/unauthenticated on purpose</span></li>
+      <li><span class="m del">DEL</span><a>products/media?mediaId=…</a><span class="desc">remove one image</span></li>
+      <li><span class="m post">POST</span><a>products/import</a><span class="desc">multipart {csv_file} — bulk product+attribute import; every row created this way is forced to status=pending_approval, seller=uploader, attribute_set=chemicals</span></li>
     </ul>
   </div>
 

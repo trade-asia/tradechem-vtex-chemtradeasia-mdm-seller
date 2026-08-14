@@ -119,6 +119,72 @@ export class MdmClient extends ExternalClient {
     return Array.isArray(res.data) ? res.data : []
   }
 
+  // GET /vtex/products, scoped to this seller by mdm_seller_id (MDM's own
+  // seller id, from syncSeller — NOT vtex_seller_id, per the Products
+  // section spec). Returns every product regardless of link status, unlike
+  // getLinkedProducts above (that one's a narrower vtex_linked=1-only view
+  // used elsewhere) — status/name/sku/cas_number/hs_code/vtex_linked are all
+  // optional filters, passed straight through.
+  public async getSellerProducts(
+    token: string,
+    mdmSellerId: number,
+    page = 1,
+    perPage = 20,
+    filters?: { status?: string; name?: string; sku?: string; cas_number?: string; hs_code?: string; vtex_linked?: string }
+  ): Promise<{ products: any[]; currentPage: number; lastPage: number; total: number }> {
+    const params = new URLSearchParams({ per_page: String(perPage), page: String(page), mdm_seller_id: String(mdmSellerId) })
+    if (filters) {
+      for (const [key, val] of Object.entries(filters)) {
+        if (val !== undefined && val !== '') params.set(key, val)
+      }
+    }
+    const res: ProductsResponse = await this.http.get(
+      this.url(`/vtex/products?${params.toString()}`),
+      { headers: { Authorization: `Bearer ${token}` } }
+    )
+    return {
+      products: Array.isArray(res.data) ? res.data : [],
+      currentPage: res.meta?.current_page ?? page,
+      lastPage: res.meta?.last_page ?? 1,
+      total: res.meta?.total ?? 0,
+    }
+  }
+
+  // vtex_product_id is scoped per seller on MDM's side, not global — per MDM
+  // (2026-08-13): the uniqueness constraint on their product-link table is
+  // (vtex_seller_id, vtex_product_id), so the same numeric id can be a
+  // completely different link depending on seller scope. Omitting
+  // vtexSellerId only resolves marketplace-linked products (no seller);
+  // this app always has exactly one seller in scope (the account it's
+  // installed on), so it's always passed.
+  public async getProductMedia(token: string, vtexProductId: string, vtexSellerId: string): Promise<any[]> {
+    const res: any = await this.http.get(
+      this.url(`/vtex/products/${vtexProductId}/media?vtex_seller_id=${encodeURIComponent(vtexSellerId)}`),
+      { headers: { Authorization: `Bearer ${token}` } }
+    )
+    return Array.isArray(res.data) ? res.data : []
+  }
+
+  public async addProductMedia(
+    token: string,
+    vtexProductId: string,
+    vtexSellerId: string,
+    images: { url: string; alt?: string; is_main?: boolean; sort_order?: number }[]
+  ): Promise<any> {
+    const res: any = await this.http.post(
+      this.url(`/vtex/products/${vtexProductId}/media`),
+      { images, vtex_seller_id: vtexSellerId },
+      { headers: { Authorization: `Bearer ${token}` } }
+    )
+    return res?.data ?? res
+  }
+
+  public async deleteProductMedia(token: string, mediaId: number): Promise<void> {
+    await this.http.delete(this.url(`/vtex/media/${mediaId}`), {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+  }
+
   // Always seller-scoped: MDM returns only this seller's documents
   public async listSellerDocuments(
     token: string,

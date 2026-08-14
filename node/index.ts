@@ -1,6 +1,6 @@
 import { Service, ServiceContext, ParamsContext, RecorderState, method } from '@vtex/api'
 import { Clients } from './clients'
-import { getSellerProducts, getSellerCountries } from './handlers/sellerProductsHandler'
+import { getSellerProducts, getSellerCountries, listSellerProducts, getSellerProductMedia, addSellerProductMedia, deleteSellerProductMedia, importSellerProducts, serveSellerProductMedia } from './handlers/sellerProductsHandler'
 import { getSellerDocuments, uploadSellerDocument, deleteSellerDocument } from './handlers/sellerDocumentsHandler'
 import { devReadSettings, devSaveSettings, devDeleteSettings } from './handlers/devSettingsHandler'
 import { catalogCapture, manualCapture, listMyProducts, captureEventLog, inspectProduct } from './handlers/productCaptureHandler'
@@ -9,6 +9,7 @@ import { getMySubscription, getMySubscriptionPlans, getMySubscriptionInvoices, i
 import { logsHub } from './handlers/logsHubHandler'
 import { debugAdminToken } from './handlers/debugAdminTokenHandler'
 import { touchSellerLogin } from './handlers/sellerLoginHandler'
+import { getSellerAccount } from './handlers/sellerAccountHandler'
 
 declare global {
   type Context = ServiceContext<Clients, State>
@@ -34,6 +35,10 @@ export default new Service<Clients, State, ParamsContext>({
   routes: {
     sellerProducts: method({ GET: [getSellerProducts] }),
     sellerCountries: method({ GET: [getSellerCountries] }),
+    sellerProductsList: method({ GET: [listSellerProducts] }),
+    sellerProductMedia: method({ GET: [getSellerProductMedia], POST: [addSellerProductMedia], DELETE: [deleteSellerProductMedia] }),
+    sellerProductsImport: method({ POST: [importSellerProducts] }),
+    sellerProductMediaServe: method({ GET: [serveSellerProductMedia] }),
     sellerDocuments: method({ GET: [getSellerDocuments], POST: [uploadSellerDocument] }),
     sellerDocumentDelete: method({ POST: [deleteSellerDocument] }),
     devSettings: method({ GET: [devReadSettings], POST: [devSaveSettings], DELETE: [devDeleteSettings] }),
@@ -50,6 +55,7 @@ export default new Service<Clients, State, ParamsContext>({
     logsHub: method({ GET: [logsHub] }),
     debugAdminToken: method({ GET: [debugAdminToken] }),
     touchSellerLogin: method({ GET: [touchSellerLogin] }),
+    sellerAccount: method({ GET: [getSellerAccount] }),
     mdmSubscriptionCheckout: method({ POST: [initMdmSubscriptionCheckout] }),
     mdmSubscriptionCancel: method({ POST: [cancelMySubscription] }),
   },

@@ -1,4 +1,8 @@
 {
+  "admin.app.mdm-seller-products": {
+    "component": "SellerProducts",
+    "path": "/admin/app/mdm-seller/products"
+  },
   "admin.app.mdm-seller-documents": {
     "component": "SellerDocuments",
     "path": "/admin/app/mdm-seller/documents"

@@ -97,7 +97,7 @@ const CurrentSubscriptionCard = ({ subscription, onOpenCancel }) => {
         </span>
       </div>
       <div style={{ fontSize: 13, color: '#666', marginBottom: 14 }}>{subscription.billing_cycle}</div>
-      <div style={{ fontSize: 12, color: canceled ? '#dc2626' : scheduledToCancel ? '#b45309' : '#666', marginBottom: scheduledToCancel || (!canceled && !scheduledToCancel) ? 14 : 0 }}>
+      <div style={{ fontSize: 12, color: canceled ? '#dc2626' : scheduledToCancel ? '#b45309' : '#666', marginBottom: 6 }}>
         {canceled
           ? `Canceled ${subscription.canceled_at}`
           : scheduledToCancel
@@ -105,6 +105,14 @@ const CurrentSubscriptionCard = ({ subscription, onOpenCancel }) => {
             : subscription.current_period_end_formatted
               ? `Renews ${subscription.current_period_end_formatted}`
               : null}
+      </div>
+
+      {/* Kept visible even when canceled — this is what to hand to support
+          if something goes wrong (e.g. re-subscribe failing). id = MDM's own
+          internal subscription id; external_subscription_id = Stripe's. */}
+      <div style={{ fontSize: 11, color: '#999', marginBottom: scheduledToCancel || (!canceled && !scheduledToCancel) ? 14 : 12, fontFamily: 'ui-monospace, Menlo, Consolas, monospace' }}>
+        Subscription ID: {subscription.id}
+        {subscription.external_subscription_id && <> · {subscription.external_subscription_id}</>}
       </div>
 
       {!canceled && !scheduledToCancel && (
