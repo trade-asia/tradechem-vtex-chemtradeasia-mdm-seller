@@ -185,6 +185,34 @@ export class MdmClient extends ExternalClient {
     })
   }
 
+  // mdm_product_id-keyed counterparts (added by MDM 2026-08-18) — for a
+  // product that isn't linked to a VTEX product yet, so has no
+  // vtex_product_id to key the routes above on. Same request/response shape;
+  // MDM confirmed media added here carries over automatically to the
+  // vtex_product_id routes once the product is later linked, so callers
+  // don't need to migrate anything themselves.
+  public async getProductMediaByMdmId(token: string, mdmProductId: string, vtexSellerId: string): Promise<any[]> {
+    const res: any = await this.http.get(
+      this.url(`/vtex/mdm-products/${mdmProductId}/media?vtex_seller_id=${encodeURIComponent(vtexSellerId)}`),
+      { headers: { Authorization: `Bearer ${token}` } }
+    )
+    return Array.isArray(res.data) ? res.data : []
+  }
+
+  public async addProductMediaByMdmId(
+    token: string,
+    mdmProductId: string,
+    vtexSellerId: string,
+    images: { url: string; alt?: string; is_main?: boolean; sort_order?: number }[]
+  ): Promise<any> {
+    const res: any = await this.http.post(
+      this.url(`/vtex/mdm-products/${mdmProductId}/media`),
+      { images, vtex_seller_id: vtexSellerId },
+      { headers: { Authorization: `Bearer ${token}` } }
+    )
+    return res?.data ?? res
+  }
+
   // Always seller-scoped: MDM returns only this seller's documents
   public async listSellerDocuments(
     token: string,

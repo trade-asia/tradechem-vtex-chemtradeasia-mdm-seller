@@ -89,10 +89,17 @@ const MediaModal = ({ product, onClose }) => {
   const [lightboxUrl, setLightboxUrl] = useState(null)
   const fileInputRef = useRef(null)
 
+  // Prefer the vtex_product_id route once linked; fall back to mdm_product_id
+  // otherwise (MDM's mdm-products/{id}/media routes, added 2026-08-18 so
+  // sellers can add media before a product is linked to VTEX at all).
+  const mediaQuery = product.vtex?.vtex_product_id
+    ? `vtexProductId=${encodeURIComponent(product.vtex.vtex_product_id)}`
+    : `mdmProductId=${encodeURIComponent(product.id)}`
+
   const load = useCallback(() => {
     setLoading(true)
     setError(null)
-    fetch(`${BASE}/products/media?vtexProductId=${encodeURIComponent(product.vtex?.vtex_product_id ?? '')}`)
+    fetch(`${BASE}/products/media?${mediaQuery}`)
       .then(parseResponse)
       .then(data => {
         if (!data.success) throw new Error(data.detail ? `${data.error}: ${data.detail}` : data.error)
@@ -113,7 +120,7 @@ const MediaModal = ({ product, onClose }) => {
     try {
       const form = new FormData()
       form.append('file', file)
-      const res = await fetch(`${BASE}/products/media?vtexProductId=${encodeURIComponent(product.vtex?.vtex_product_id ?? '')}`, {
+      const res = await fetch(`${BASE}/products/media?${mediaQuery}`, {
         method: 'POST',
         body: form,
       })
@@ -633,16 +640,10 @@ const SellerProducts = () => {
               </div>
               <div>
                 <button
-                  onClick={() => p.vtex?.linked && setMediaProduct(p)}
-                  disabled={!p.vtex?.linked}
-                  title={p.vtex?.linked ? undefined : 'Link this product to VTEX first — MDM’s media API needs a VTEX product ID to attach images to.'}
+                  onClick={() => setMediaProduct(p)}
                   style={{
-                    background: '#fff',
-                    border: `1px solid ${p.vtex?.linked ? '#9333ea' : '#ccc'}`,
-                    borderRadius: 4, padding: '3px 10px',
-                    fontSize: 11, fontWeight: 600,
-                    color: p.vtex?.linked ? '#9333ea' : '#999',
-                    cursor: p.vtex?.linked ? 'pointer' : 'not-allowed',
+                    background: '#fff', border: '1px solid #9333ea', borderRadius: 4, padding: '3px 10px',
+                    fontSize: 11, fontWeight: 600, color: '#9333ea', cursor: 'pointer',
                   }}
                 >
                   Media

@@ -151,18 +151,26 @@ export async function listSellerProducts(ctx: ServiceContext<Clients>) {
   }
 }
 
+// Routes to MDM's mdm_product_id-keyed endpoints when there's no VTEX link
+// yet (see MdmClient's *ByMdmId methods) — lets sellers add media right
+// after import instead of waiting on admin approval + linking first. Once a
+// product IS linked, the vtex_product_id route is used instead; MDM
+// confirmed media added pre-link carries over automatically either way.
 export async function getSellerProductMedia(ctx: ServiceContext<Clients>) {
   ctx.status = 200
   const vtexProductId = (ctx.query as any).vtexProductId as string | undefined
-  if (!vtexProductId) {
-    ctx.body = { success: false, error: 'vtexProductId is required' }
+  const mdmProductId = (ctx.query as any).mdmProductId as string | undefined
+  if (!vtexProductId && !mdmProductId) {
+    ctx.body = { success: false, error: 'vtexProductId or mdmProductId is required' }
     return
   }
   const auth = await mdmAuth(ctx)
   if (!auth) return
 
   try {
-    const media = await ctx.clients.mdm.getProductMedia(auth.token, vtexProductId, auth.vtexSellerId)
+    const media = vtexProductId
+      ? await ctx.clients.mdm.getProductMedia(auth.token, vtexProductId, auth.vtexSellerId)
+      : await ctx.clients.mdm.getProductMediaByMdmId(auth.token, mdmProductId as string, auth.vtexSellerId)
     // currentSellerId lets the frontend gate the Remove button per-item on
     // media[].vtex_seller_id — belt-and-braces per MDM (2026-08-13): passing
     // vtex_seller_id here already filters the list to this seller's own
@@ -233,8 +241,9 @@ export async function serveSellerProductMedia(ctx: ServiceContext<Clients>) {
 export async function addSellerProductMedia(ctx: ServiceContext<Clients>) {
   ctx.status = 200
   const vtexProductId = (ctx.query as any).vtexProductId as string | undefined
-  if (!vtexProductId) {
-    ctx.body = { success: false, error: 'vtexProductId is required' }
+  const mdmProductId = (ctx.query as any).mdmProductId as string | undefined
+  if (!vtexProductId && !mdmProductId) {
+    ctx.body = { success: false, error: 'vtexProductId or mdmProductId is required' }
     return
   }
 
@@ -304,9 +313,13 @@ export async function addSellerProductMedia(ctx: ServiceContext<Clients>) {
       contentType: fileContentType,
       base64: fileBuffer.toString('base64'),
     })
-    const result = await ctx.clients.mdm.addProductMedia(auth.token, vtexProductId, auth.vtexSellerId, [
-      { url: mediaUrl(ctx, key), alt: fileName },
-    ])
+    const result = vtexProductId
+      ? await ctx.clients.mdm.addProductMedia(auth.token, vtexProductId, auth.vtexSellerId, [
+          { url: mediaUrl(ctx, key), alt: fileName },
+        ])
+      : await ctx.clients.mdm.addProductMediaByMdmId(auth.token, mdmProductId as string, auth.vtexSellerId, [
+          { url: mediaUrl(ctx, key), alt: fileName },
+        ])
     ctx.body = { success: true, result }
   } catch (err: any) {
     ctx.body = { success: false, error: 'Failed to add media', detail: mdmErrDetail(err) }
