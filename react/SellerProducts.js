@@ -13,6 +13,7 @@ const STATUS_OPTIONS = [
   { value: 'draft', label: 'Draft' },
   { value: 'archived', label: 'Archived' },
   { value: 'pending', label: 'Pending Approval' },
+  { value: 'rejected', label: 'Rejected' },
 ]
 
 const VTEX_LINKED_OPTIONS = [
@@ -27,6 +28,7 @@ const STATUS_COLORS = {
   archived: '#9E9E9E',
   pending: '#3b82f6',
   pending_approval: '#3b82f6',
+  rejected: '#dc2626',
 }
 
 const COLS = '1fr 120px 100px 110px 100px'
