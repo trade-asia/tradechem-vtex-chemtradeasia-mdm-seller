@@ -614,20 +614,20 @@ const SellerProducts = () => {
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
+            width: 32,
             height: 32,
             boxSizing: 'border-box',
             background: 'none',
-            border: '1px solid #ccc',
-            borderRadius: 4,
-            padding: '0 12px',
-            fontSize: 12,
+            border: 'none',
+            padding: 0,
+            fontSize: 16,
             lineHeight: 1,
             cursor: loading ? 'default' : 'pointer',
             color: '#555',
             opacity: loading ? 0.6 : 1,
           }}
         >
-          {loading ? 'Refreshing…' : '↻ Refresh'}
+          ↻
         </button>
         <Pagination
           currentItemFrom={totalFrom}
