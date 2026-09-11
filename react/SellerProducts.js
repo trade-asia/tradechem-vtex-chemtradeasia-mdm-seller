@@ -272,10 +272,10 @@ const ImportModal = ({ onClose, onImported }) => {
   const [importing, setImporting] = useState(false)
   const [error, setError] = useState(null)
   const [result, setResult] = useState(null)
-  // Set once the pre-flight check finds SKUs already active — holds what's
-  // needed to either re-upload as-is or rebuild the CSV with those rows
-  // dropped, without re-parsing the file a second time.
-  const [conflict, setConflict] = useState(null) // { activeSkus: [{sku,name}], rows, skuColIndex }
+  // Set once the pre-flight check finds SKUs already active or rejected —
+  // holds what's needed to either re-upload as-is or rebuild the CSV with
+  // those rows dropped, without re-parsing the file a second time.
+  const [conflict, setConflict] = useState(null) // { flagged: [{sku,name,status}], rows, skuColIndex }
 
   const upload = async (uploadFile) => {
     setImporting(true)
@@ -296,9 +296,10 @@ const ImportModal = ({ onClose, onImported }) => {
   }
 
   // Parses the CSV client-side, looks up each SKU's *current* status, and
-  // stops to warn before touching anything that's already active — updating
-  // an active SKU reverts it to pending in both MDM and VTEX, delisting it
-  // from the storefront, which is not something to do without asking first.
+  // stops to warn before touching anything active or rejected — either way,
+  // the SKU resets to Pending Approval in both MDM and VTEX, so the seller
+  // should confirm first: active means something live gets delisted,
+  // rejected means it's being resubmitted for re-review.
   const handleImport = async () => {
     if (!file) return
     setChecking(true)
@@ -323,12 +324,12 @@ const ImportModal = ({ onClose, onImported }) => {
           return (data.products ?? []).find(p => p.sku === sku) ?? null
         } catch { return null }
       }))
-      const activeSkus = lookups
-        .filter(p => p && p.status === 'active')
-        .map(p => ({ sku: p.sku, name: p.name }))
+      const flagged = lookups
+        .filter(p => p && (p.status === 'active' || p.status === 'rejected'))
+        .map(p => ({ sku: p.sku, name: p.name, status: p.status }))
 
-      if (activeSkus.length) {
-        setConflict({ activeSkus, rows, skuColIndex })
+      if (flagged.length) {
+        setConflict({ flagged, rows, skuColIndex })
         return
       }
       await upload(file)
@@ -345,14 +346,14 @@ const ImportModal = ({ onClose, onImported }) => {
   }
 
   const handleConfirmSkip = () => {
-    const { activeSkus, rows, skuColIndex } = conflict
-    const skipSet = new Set(activeSkus.map(s => s.sku))
+    const { flagged, rows, skuColIndex } = conflict
+    const skipSet = new Set(flagged.map(s => s.sku))
     const filteredRows = [rows[0], ...rows.slice(1).filter(r => !skipSet.has((r[skuColIndex] ?? '').trim()))]
     const csvText = serializeCsv(filteredRows)
     const filteredFile = new File([csvText], file.name, { type: file.type || 'text/csv' })
     setConflict(null)
     if (filteredRows.length <= 1) {
-      setError('Nothing left to import — every row in the file was already active.')
+      setError('Nothing left to import — every row in the file was already active or rejected.')
       return
     }
     upload(filteredFile)
@@ -407,26 +408,50 @@ const ImportModal = ({ onClose, onImported }) => {
           </a>
         </div>
 
-        {conflict ? (
-          <div style={{
-            fontSize: 12, color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a',
-            borderRadius: 6, padding: '12px 14px', marginBottom: 16,
-          }}>
-            <div style={{ fontWeight: 700, marginBottom: 6 }}>
-              {conflict.activeSkus.length} SKU{conflict.activeSkus.length > 1 ? 's are' : ' is'} already active
+        {conflict ? (() => {
+          const activeFlagged = conflict.flagged.filter(s => s.status === 'active')
+          const rejectedFlagged = conflict.flagged.filter(s => s.status === 'rejected')
+          return (
+            <div style={{
+              fontSize: 12, color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a',
+              borderRadius: 6, padding: '12px 14px', marginBottom: 16,
+            }}>
+              {activeFlagged.length > 0 && (
+                <div style={{ marginBottom: rejectedFlagged.length > 0 ? 14 : 8 }}>
+                  <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                    {activeFlagged.length} SKU{activeFlagged.length > 1 ? 's are' : ' is'} already active
+                  </div>
+                  <div style={{ marginBottom: 8 }}>
+                    Updating {activeFlagged.length > 1 ? 'them' : 'it'} will revert the status back to Pending
+                    Approval in both MDM and VTEX, and the product will be delisted from VTEX until it's re-approved.
+                  </div>
+                  <div style={{ maxHeight: 120, overflowY: 'auto' }}>
+                    {activeFlagged.map(s => (
+                      <div key={s.sku} style={{ fontFamily: 'monospace' }}>{s.sku} — {s.name}</div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {rejectedFlagged.length > 0 && (
+                <div style={{ marginBottom: 8 }}>
+                  <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                    {rejectedFlagged.length} SKU{rejectedFlagged.length > 1 ? 's are' : ' is'} currently rejected
+                  </div>
+                  <div style={{ marginBottom: 8 }}>
+                    Updating {rejectedFlagged.length > 1 ? 'them' : 'it'} will resubmit for re-review, resetting the
+                    status back to Pending Approval — this wasn't live on VTEX before, so nothing will be delisted.
+                  </div>
+                  <div style={{ maxHeight: 120, overflowY: 'auto' }}>
+                    {rejectedFlagged.map(s => (
+                      <div key={s.sku} style={{ fontFamily: 'monospace' }}>{s.sku} — {s.name}</div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div>Proceed and update everyone anyway, or skip just these SKUs and import the rest?</div>
             </div>
-            <div style={{ marginBottom: 8 }}>
-              Updating {conflict.activeSkus.length > 1 ? 'them' : 'it'} will revert the status back to Pending
-              Approval in both MDM and VTEX, and the product will be delisted from VTEX until it's re-approved.
-            </div>
-            <div style={{ marginBottom: 10, maxHeight: 120, overflowY: 'auto' }}>
-              {conflict.activeSkus.map(s => (
-                <div key={s.sku} style={{ fontFamily: 'monospace' }}>{s.sku} — {s.name}</div>
-              ))}
-            </div>
-            <div>Proceed and update everyone anyway, or skip just these SKUs and import the rest?</div>
-          </div>
-        ) : !result && (
+          )
+        })() : !result && (
           <div style={{ marginBottom: 12 }}>
             <input
               type="file"
