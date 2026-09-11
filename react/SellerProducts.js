@@ -608,7 +608,7 @@ const SellerProducts = () => {
 
       {error && <div style={{ marginBottom: 12 }}><Alert type="error">{error}</Alert></div>}
 
-      <div className="mb3" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12 }}>
+      <div className="mb3" style={{ display: 'flex', flexWrap: 'nowrap', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
         <button
           onClick={handleRefresh}
           disabled={loading}
@@ -620,8 +620,9 @@ const SellerProducts = () => {
             width: 32,
             height: 32,
             boxSizing: 'border-box',
-            background: 'none',
-            border: 'none',
+            background: '#fff',
+            border: '1px solid #dfe3e8',
+            borderRadius: 4,
             padding: 0,
             fontSize: 16,
             lineHeight: 1,
