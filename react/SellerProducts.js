@@ -658,14 +658,24 @@ const SellerProducts = () => {
         >
           ↻
         </button>
-        <Pagination
-          currentItemFrom={totalFrom}
-          currentItemTo={totalTo}
-          textOf="of"
-          totalItems={total}
-          onNextClick={handleNextPage}
-          onPrevClick={handlePrevPage}
-        />
+        {/* Pagination's own internal markup carries a Tachyons "pt5"
+            (padding-top: 4rem = 64px) on its content wrapper — real, not a
+            layout bug on our side (confirmed by inspecting the rendered
+            DOM). That pushes its visible content down inside a much taller
+            box than our 32px button, which just LOOKS like two stacked rows
+            since alignItems:center centers the button against that inflated
+            height. Pulling the whole component up by the same 64px cancels
+            it back out. */}
+        <div style={{ marginTop: -64 }}>
+          <Pagination
+            currentItemFrom={totalFrom}
+            currentItemTo={totalTo}
+            textOf="of"
+            totalItems={total}
+            onNextClick={handleNextPage}
+            onPrevClick={handlePrevPage}
+          />
+        </div>
       </div>
 
       <div style={{ border: '1px solid #e0e4e8', borderRadius: 6, overflow: 'hidden' }}>
