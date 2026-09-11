@@ -470,17 +470,10 @@ const ImportModal = ({ onClose, onImported }) => {
   )
 }
 
-// Reads the rejection reason from whichever field name MDM ends up using —
-// not confirmed live yet (their GET /vtex/products response for a rejected
-// product carries no reason field at all as of 2026-09-11, verified against
-// a real rejected product). Checked defensively across a few likely names so
-// this starts working the moment MDM adds it, without another code change.
+// Confirmed live 2026-09-11: MDM's GET /vtex/products returns rejection_reason
+// on a rejected product.
 function rejectionReason(product) {
-  return product?.rejection_reason
-    ?? product?.reject_reason
-    ?? product?.rejected_reason
-    ?? product?.status_reason
-    ?? null
+  return product?.rejection_reason ?? null
 }
 
 // ── Rejection reason modal: shown from the "!" badge next to a Rejected status. ──
