@@ -481,7 +481,7 @@ const RejectionReasonModal = ({ product, onClose }) => {
   const reason = rejectionReason(product)
   return (
     <Modal isOpen centered onClose={onClose} title="Product rejected">
-      <div style={{ minWidth: 420, maxWidth: 520 }}>
+      <div style={{ minWidth: 600, maxWidth: 700 }}>
         <div style={{ fontWeight: 600, color: '#142032', fontSize: 13, marginBottom: 12 }}>
           {product.name}
         </div>
