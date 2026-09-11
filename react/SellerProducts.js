@@ -470,6 +470,48 @@ const ImportModal = ({ onClose, onImported }) => {
   )
 }
 
+// Reads the rejection reason from whichever field name MDM ends up using —
+// not confirmed live yet (their GET /vtex/products response for a rejected
+// product carries no reason field at all as of 2026-09-11, verified against
+// a real rejected product). Checked defensively across a few likely names so
+// this starts working the moment MDM adds it, without another code change.
+function rejectionReason(product) {
+  return product?.rejection_reason
+    ?? product?.reject_reason
+    ?? product?.rejected_reason
+    ?? product?.status_reason
+    ?? null
+}
+
+// ── Rejection reason modal: shown from the "!" badge next to a Rejected status. ──
+const RejectionReasonModal = ({ product, onClose }) => {
+  const reason = rejectionReason(product)
+  return (
+    <Modal isOpen centered onClose={onClose} title="Product rejected">
+      <div style={{ minWidth: 420, maxWidth: 520 }}>
+        <div style={{ fontWeight: 600, color: '#142032', fontSize: 13, marginBottom: 12 }}>
+          {product.name}
+        </div>
+        {reason ? (
+          <div style={{
+            fontSize: 13, color: '#7f1d1d', background: '#fef2f2', border: '1px solid #fecaca',
+            borderRadius: 6, padding: '10px 14px',
+          }}>
+            {reason}
+          </div>
+        ) : (
+          <div style={{ fontSize: 12, color: '#999' }}>
+            No reason was provided for this rejection.
+          </div>
+        )}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 20 }}>
+          <Button variation="tertiary" onClick={onClose}>Close</Button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
 const SellerProducts = () => {
   const [products, setProducts] = useState([])
   const [loading, setLoading] = useState(true)
@@ -486,6 +528,7 @@ const SellerProducts = () => {
 
   const [mediaProduct, setMediaProduct] = useState(null)
   const [showImport, setShowImport] = useState(false)
+  const [rejectionProduct, setRejectionProduct] = useState(null)
 
   const fetchParamsRef = useRef({ page: 1 })
   const debounceRef = useRef(null)
@@ -634,8 +677,23 @@ const SellerProducts = () => {
             >
               <div style={{ fontWeight: 600, fontSize: 13, color: '#142032' }}>{p.name}</div>
               <div style={{ fontSize: 12, fontFamily: 'monospace', color: '#444' }}>{p.sku}</div>
-              <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <Tag bgColor={STATUS_COLORS[p.status] ?? '#9E9E9E'} color="#fff">{p.status}</Tag>
+                {p.status === 'rejected' && (
+                  <button
+                    onClick={() => setRejectionProduct(p)}
+                    title="View rejection reason"
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      width: 16, height: 16, borderRadius: '50%',
+                      background: '#dc2626', color: '#fff', border: 'none',
+                      fontSize: 11, fontWeight: 700, lineHeight: 1, padding: 0,
+                      cursor: 'pointer', flexShrink: 0,
+                    }}
+                  >
+                    !
+                  </button>
+                )}
               </div>
               <div style={{ fontSize: 12, color: '#666' }}>
                 {p.vtex?.linked ? `Linked - ${p.vtex.vtex_product_id}` : 'Not linked'}
@@ -668,6 +726,7 @@ const SellerProducts = () => {
       </div>
 
       {mediaProduct && <MediaModal product={mediaProduct} onClose={() => setMediaProduct(null)} />}
+      {rejectionProduct && <RejectionReasonModal product={rejectionProduct} onClose={() => setRejectionProduct(null)} />}
       {showImport && (
         <ImportModal
           onClose={() => setShowImport(false)}
