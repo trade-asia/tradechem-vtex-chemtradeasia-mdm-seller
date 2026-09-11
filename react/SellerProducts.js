@@ -538,7 +538,10 @@ const SellerProducts = () => {
       if (skuFilter) params.set('sku', skuFilter)
       if (casFilter) params.set('cas_number', casFilter)
       if (hsFilter) params.set('hs_code', hsFilter)
-      if (statusFilter) params.set('status', statusFilter)
+      // MDM treats an omitted status as active-only, not "all statuses" —
+      // "All Statuses" here has to send the explicit status=all value to
+      // actually mean that (confirmed live 2026-09-11).
+      params.set('status', statusFilter || 'all')
       if (linkedFilter) params.set('vtex_linked', linkedFilter)
 
       const res = await fetch(`${BASE}/products-list?${params.toString()}`)
