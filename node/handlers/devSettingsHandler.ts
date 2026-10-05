@@ -134,17 +134,31 @@ export async function getSellerMdmToken(ctx: any): Promise<string | null> {
 
 // Reads app settings, falling back to the VBase dev config, falling back to
 // the marketplace app's global settings (fetched once, then cached locally).
+// _diag is attached only when every source came up empty — a breadcrumb for
+// handlers to surface instead of a bare "not configured" with no way to tell
+// which step actually failed (own settings missing vs VBase read error vs
+// the cross-account fetch itself failing, and why).
 export async function readMdmConfig(ctx: ServiceContext<Clients>): Promise<any> {
   const appId = process.env.VTEX_APP_ID!
+  const diag: string[] = []
+
   let settings: any = {}
-  try { settings = await ctx.clients.apps.getAppSettings(appId) } catch {}
+  try {
+    settings = await ctx.clients.apps.getAppSettings(appId)
+  } catch (err: any) {
+    diag.push(`getAppSettings threw: ${err?.message}`)
+  }
 
   if (settings?.mdmUsername && settings?.mdmPassword) return settings
+  diag.push('own app settings: empty')
 
   try {
     const devConfig = await ctx.clients.vbase.getJSON<any>(DEV_CONFIG_BUCKET, DEV_CONFIG_KEY, true)
     if (devConfig?.mdmUsername) return devConfig
-  } catch {}
+    diag.push('vbase dev config: empty')
+  } catch (err: any) {
+    diag.push(`vbase dev config threw: ${err?.message}`)
+  }
 
   // Nothing usable locally yet — pull the shared config from the marketplace
   // app and cache it, so this cross-account call only happens once per
@@ -157,7 +171,10 @@ export async function readMdmConfig(ctx: ServiceContext<Clients>): Promise<any> 
       await ctx.clients.vbase.saveJSON(DEV_CONFIG_BUCKET, DEV_CONFIG_KEY, globalConfig)
       return globalConfig
     }
-  } catch {}
+    diag.push('global-settings fetch: returned no mdmUsername')
+  } catch (err: any) {
+    diag.push(`global-settings fetch threw: ${err?.response?.status ?? ''} ${err?.message}`)
+  }
 
-  return settings ?? {}
+  return { ...(settings ?? {}), _diag: diag }
 }

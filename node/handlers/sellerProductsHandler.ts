@@ -11,7 +11,7 @@ async function readSettings(ctx: ServiceContext<Clients>): Promise<any | null> {
   const { mdmUsername, mdmPassword } = settings
   if (!mdmUsername || !mdmPassword) {
     ctx.status = 200
-    ctx.body = { success: false, error: 'MDM credentials not configured in app settings.' }
+    ctx.body = { success: false, error: 'MDM credentials not configured in app settings.', diag: settings._diag }
     return null
   }
   if (settings.mdmApiEndpoint) ctx.clients.mdm.setBaseUrl(settings.mdmApiEndpoint)
@@ -107,7 +107,7 @@ async function mdmAuth(ctx: ServiceContext<Clients>): Promise<MdmAuth | null> {
   const settings = await readMdmConfig(ctx)
   const { mdmApiEndpoint, mdmUsername, mdmPassword } = settings
   if (!mdmUsername || !mdmPassword) {
-    ctx.body = { success: false, error: 'MDM credentials not configured in app settings.' }
+    ctx.body = { success: false, error: 'MDM credentials not configured in app settings.', diag: settings._diag }
     return null
   }
   if (mdmApiEndpoint) ctx.clients.mdm.setBaseUrl(mdmApiEndpoint)
