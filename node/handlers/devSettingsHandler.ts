@@ -2,22 +2,32 @@ import { ServiceContext } from '@vtex/api'
 import { Clients } from '../clients'
 import { readBody } from '../helpers/readBody'
 
-// Global config source: tradechem-vtex-chemtradeasia-mdm (the marketplace
-// app) is the single source of truth for values shared across every seller
-// (MDM login, Stripe platform keys) — see its node/handlers/mdmSettingsHandler.ts.
-// Secret below must match GLOBAL_SETTINGS_SECRET there exactly.
-const GLOBAL_SETTINGS_SECRET = 'mdm-global-settings-x7Qp2Lr9Vt4Kf8Zn'
+// Global config source: MDM now hosts this (Utilities > Integrations > VTEX
+// in MDM Admin), not our own marketplace app. Originally this called our
+// marketplace app's .myvtex.com host directly — that consistently failed at
+// the TLS layer from inside a different VTEX account's sandbox, confirmed
+// with both a raw axios call and a proper ExternalClient (see git history on
+// this file, 2026-10-05). MDM is a host every app here already calls
+// reliably for everything else, so the shared config moved there instead.
+// Token is long-lived/non-rotating by design — see getSharedVtexConfig's
+// comment in MdmClient.ts.
+const MDM_SHARED_CONFIG_TOKEN = '1942422|YVCvliBAkyJPwSRBBmKObwFaWuwVQIMfYOVoqu1pf6a8ba06'
 
-// Routed through MarketplaceAppClient (a proper @vtex/api ExternalClient)
-// rather than a raw axios call — the raw axios.get() version of this
-// consistently failed with "Client network socket disconnected before
-// secure TLS connection was established" for any seller account with
-// nothing cached locally (confirmed live via a diag trace, 2026-10-05),
-// while every other cross-service call in this app already goes through
-// ExternalClient and has never shown that failure.
 async function fetchGlobalMdmSettings(ctx: ServiceContext<Clients>): Promise<any | null> {
-  const res: any = await ctx.clients.marketplaceApp.getGlobalSettings(GLOBAL_SETTINGS_SECRET)
-  return res?.success ? res.settings : null
+  const data: any = await ctx.clients.mdm.getSharedVtexConfig(MDM_SHARED_CONFIG_TOKEN)
+  if (!data?.mdm_username) return null
+  // MDM's response uses snake_case; normalize to the camelCase shape the
+  // rest of this app's settings object (own App Settings / VBase cache)
+  // already uses everywhere else.
+  return {
+    mdmUsername: data.mdm_username,
+    mdmPassword: data.mdm_password,
+    vtexAppKey: data.vtex_app_key,
+    vtexAppToken: data.vtex_app_token,
+    stripeSecretKey: data.stripe_secret_key,
+    stripePublishableKey: data.stripe_publishable_key,
+    stripeWebhookSecret: data.stripe_webhook_secret,
+  }
 }
 
 // ⚠️ DEV ONLY — remove this handler and its route before `vtex publish`.
@@ -173,13 +183,14 @@ export async function readMdmConfig(ctx: ServiceContext<Clients>): Promise<any> 
       await ctx.clients.vbase.saveJSON(DEV_CONFIG_BUCKET, DEV_CONFIG_KEY, globalConfig)
       return globalConfig
     }
-    diag.push('[v2-ExternalClient] global-settings fetch: returned no mdmUsername')
+    diag.push('[v3-mdm-shared-config] fetch: returned no mdm_username')
   } catch (err: any) {
-    // [v2-ExternalClient] prefix is a deliberate, unmistakable marker — this
-    // exact wording can only appear once this build is actually the one
-    // running, settling whether a given account is still on pre-fix code
-    // without guessing from error-text similarity alone.
-    diag.push(`[v2-ExternalClient] global-settings fetch threw: ${err?.response?.status ?? ''} ${err?.message}`)
+    // [v3-mdm-shared-config] prefix is a deliberate, unmistakable marker —
+    // this exact wording can only appear once this build is actually the
+    // one running, settling whether a given account is still on older code
+    // without guessing from error-text similarity alone (this is what
+    // [v2-ExternalClient] was for in the previous, now-abandoned approach).
+    diag.push(`[v3-mdm-shared-config] fetch threw: ${err?.response?.status ?? ''} ${err?.message}`)
   }
 
   return { ...(settings ?? {}), _diag: diag }

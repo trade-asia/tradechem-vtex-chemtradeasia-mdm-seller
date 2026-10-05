@@ -185,6 +185,24 @@ export class MdmClient extends ExternalClient {
     })
   }
 
+  // Shared VTEX integration config (MDM login, VTEX App Key/Token, Stripe
+  // keys), now hosted by MDM instead of our own marketplace app — added
+  // 2026-10-05 specifically because calling our marketplace app's
+  // .myvtex.com host from inside a different VTEX account's sandbox
+  // consistently failed at the TLS layer (confirmed with both raw axios and
+  // a proper ExternalClient; see devSettingsHandler.ts). MDM is a host both
+  // the marketplace app and every seller app already call reliably for
+  // everything else, so this sidesteps that failure entirely. staticToken
+  // is a long-lived, non-rotating bearer token MDM issued for this specific
+  // purpose — rotating it would need a code change + republish on every
+  // seller account, so it's not meant to change casually.
+  public async getSharedVtexConfig(staticToken: string): Promise<any> {
+    const res: any = await this.http.get(this.url('/vtex/shared-config'), {
+      headers: { Authorization: `Bearer ${staticToken}` },
+    })
+    return res?.data ?? res
+  }
+
   // mdm_product_id-keyed counterparts (added by MDM 2026-08-18) — for a
   // product that isn't linked to a VTEX product yet, so has no
   // vtex_product_id to key the routes above on. Same request/response shape;
