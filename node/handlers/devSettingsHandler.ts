@@ -1,5 +1,4 @@
 import { ServiceContext } from '@vtex/api'
-import axios from 'axios'
 import { Clients } from '../clients'
 import { readBody } from '../helpers/readBody'
 
@@ -7,15 +6,18 @@ import { readBody } from '../helpers/readBody'
 // app) is the single source of truth for values shared across every seller
 // (MDM login, Stripe platform keys) — see its node/handlers/mdmSettingsHandler.ts.
 // Secret below must match GLOBAL_SETTINGS_SECRET there exactly.
-const GLOBAL_SETTINGS_URL = 'https://tradeasiab2b.myvtex.com/_v/chemtradeasia-mdm/global-settings'
 const GLOBAL_SETTINGS_SECRET = 'mdm-global-settings-x7Qp2Lr9Vt4Kf8Zn'
 
-async function fetchGlobalMdmSettings(): Promise<any | null> {
-  const res = await axios.get(GLOBAL_SETTINGS_URL, {
-    headers: { 'x-global-settings-secret': GLOBAL_SETTINGS_SECRET },
-    timeout: 8000,
-  })
-  return res.data?.success ? res.data.settings : null
+// Routed through MarketplaceAppClient (a proper @vtex/api ExternalClient)
+// rather than a raw axios call — the raw axios.get() version of this
+// consistently failed with "Client network socket disconnected before
+// secure TLS connection was established" for any seller account with
+// nothing cached locally (confirmed live via a diag trace, 2026-10-05),
+// while every other cross-service call in this app already goes through
+// ExternalClient and has never shown that failure.
+async function fetchGlobalMdmSettings(ctx: ServiceContext<Clients>): Promise<any | null> {
+  const res: any = await ctx.clients.marketplaceApp.getGlobalSettings(GLOBAL_SETTINGS_SECRET)
+  return res?.success ? res.settings : null
 }
 
 // ⚠️ DEV ONLY — remove this handler and its route before `vtex publish`.
@@ -166,7 +168,7 @@ export async function readMdmConfig(ctx: ServiceContext<Clients>): Promise<any> 
   // briefly unreachable, this just falls through to the empty settings
   // below rather than blocking the request.
   try {
-    const globalConfig = await fetchGlobalMdmSettings()
+    const globalConfig = await fetchGlobalMdmSettings(ctx)
     if (globalConfig?.mdmUsername) {
       await ctx.clients.vbase.saveJSON(DEV_CONFIG_BUCKET, DEV_CONFIG_KEY, globalConfig)
       return globalConfig
