@@ -173,9 +173,13 @@ export async function readMdmConfig(ctx: ServiceContext<Clients>): Promise<any> 
       await ctx.clients.vbase.saveJSON(DEV_CONFIG_BUCKET, DEV_CONFIG_KEY, globalConfig)
       return globalConfig
     }
-    diag.push('global-settings fetch: returned no mdmUsername')
+    diag.push('[v2-ExternalClient] global-settings fetch: returned no mdmUsername')
   } catch (err: any) {
-    diag.push(`global-settings fetch threw: ${err?.response?.status ?? ''} ${err?.message}`)
+    // [v2-ExternalClient] prefix is a deliberate, unmistakable marker — this
+    // exact wording can only appear once this build is actually the one
+    // running, settling whether a given account is still on pre-fix code
+    // without guessing from error-text similarity alone.
+    diag.push(`[v2-ExternalClient] global-settings fetch threw: ${err?.response?.status ?? ''} ${err?.message}`)
   }
 
   return { ...(settings ?? {}), _diag: diag }
