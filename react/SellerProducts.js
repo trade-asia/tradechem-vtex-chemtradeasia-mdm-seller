@@ -31,7 +31,7 @@ const STATUS_COLORS = {
   rejected: '#dc2626',
 }
 
-const COLS = '1fr 120px 100px 110px 100px'
+const COLS = '1fr 120px 100px 110px 190px'
 
 const parseResponse = async (res) => {
   const text = await res.text()
@@ -547,6 +547,9 @@ const SellerProducts = () => {
   const [mediaProduct, setMediaProduct] = useState(null)
   const [showImport, setShowImport] = useState(false)
   const [rejectionProduct, setRejectionProduct] = useState(null)
+  const [confirmUnpublishId, setConfirmUnpublishId] = useState(null)
+  const [unpublishingId, setUnpublishingId] = useState(null)
+  const [unpublishError, setUnpublishError] = useState(null)
 
   const fetchParamsRef = useRef({ page: 1 })
   const debounceRef = useRef(null)
@@ -604,6 +607,22 @@ const SellerProducts = () => {
     doFetch()
   }
 
+  const handleUnpublish = async (product) => {
+    setUnpublishingId(product.id)
+    setUnpublishError(null)
+    try {
+      const res = await fetch(`${BASE}/products/unpublish?mdmProductId=${encodeURIComponent(product.id)}`, { method: 'POST' })
+      const data = await parseResponse(res)
+      if (!data.success) throw new Error(data.detail ? `${data.error}: ${data.detail}` : data.error)
+      setConfirmUnpublishId(null)
+      doFetch()
+    } catch (err) {
+      setUnpublishError(err.message)
+    } finally {
+      setUnpublishingId(null)
+    }
+  }
+
   const totalFrom = total === 0 ? 0 : (page - 1) * PER_PAGE + 1
   const totalTo = Math.min(page * PER_PAGE, total)
 
@@ -632,6 +651,7 @@ const SellerProducts = () => {
       </div>
 
       {error && <div style={{ marginBottom: 12 }}><Alert type="error">{error}</Alert></div>}
+      {unpublishError && <div style={{ marginBottom: 12 }}><Alert type="error" onClose={() => setUnpublishError(null)}>{unpublishError}</Alert></div>}
 
       <div className="mb3" style={{ display: 'flex', flexWrap: 'nowrap', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
         <button
@@ -730,7 +750,7 @@ const SellerProducts = () => {
               <div style={{ fontSize: 12, color: '#666' }}>
                 {p.vtex?.linked ? `Linked - ${p.vtex.vtex_product_id}` : 'Not linked'}
               </div>
-              <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                 <button
                   onClick={() => setMediaProduct(p)}
                   style={{
@@ -740,6 +760,45 @@ const SellerProducts = () => {
                 >
                   Media
                 </button>
+                {p.status === 'active' && (
+                  confirmUnpublishId === p.id ? (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <span style={{ fontSize: 11, color: '#b45309', fontWeight: 600 }}>Unpublish?</span>
+                      <button
+                        onClick={() => handleUnpublish(p)}
+                        disabled={unpublishingId === p.id}
+                        style={{
+                          background: '#b45309', border: 'none', borderRadius: 4, padding: '3px 8px',
+                          fontSize: 11, fontWeight: 600, color: '#fff',
+                          cursor: unpublishingId === p.id ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        {unpublishingId === p.id ? '…' : 'Yes'}
+                      </button>
+                      <button
+                        onClick={() => setConfirmUnpublishId(null)}
+                        disabled={unpublishingId === p.id}
+                        style={{
+                          background: '#fff', border: '1px solid #ccc', borderRadius: 4, padding: '3px 8px',
+                          fontSize: 11, color: '#555', cursor: 'pointer',
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => setConfirmUnpublishId(p.id)}
+                      title="Revert to Pending Approval"
+                      style={{
+                        background: '#fff', border: '1px solid #b45309', borderRadius: 4, padding: '3px 10px',
+                        fontSize: 11, fontWeight: 600, color: '#b45309', cursor: 'pointer',
+                      }}
+                    >
+                      Unpublish
+                    </button>
+                  )
+                )}
               </div>
             </div>
           ))

@@ -1,6 +1,6 @@
 import { Service, ServiceContext, ParamsContext, RecorderState, method } from '@vtex/api'
 import { Clients } from './clients'
-import { getSellerProducts, getSellerCountries, listSellerProducts, getSellerProductMedia, addSellerProductMedia, deleteSellerProductMedia, importSellerProducts, serveSellerProductMedia } from './handlers/sellerProductsHandler'
+import { getSellerProducts, getSellerCountries, listSellerProducts, getSellerProductMedia, addSellerProductMedia, deleteSellerProductMedia, importSellerProducts, serveSellerProductMedia, unpublishSellerProduct } from './handlers/sellerProductsHandler'
 import { getSellerDocuments, uploadSellerDocument, deleteSellerDocument } from './handlers/sellerDocumentsHandler'
 import { devReadSettings, devSaveSettings, devDeleteSettings } from './handlers/devSettingsHandler'
 import { catalogCapture, manualCapture, listMyProducts, captureEventLog, inspectProduct } from './handlers/productCaptureHandler'
@@ -36,6 +36,7 @@ export default new Service<Clients, State, ParamsContext>({
     sellerProducts: method({ GET: [getSellerProducts] }),
     sellerCountries: method({ GET: [getSellerCountries] }),
     sellerProductsList: method({ GET: [listSellerProducts] }),
+    sellerProductUnpublish: method({ POST: [unpublishSellerProduct] }),
     sellerProductMedia: method({ GET: [getSellerProductMedia], POST: [addSellerProductMedia], DELETE: [deleteSellerProductMedia] }),
     sellerProductsImport: method({ POST: [importSellerProducts] }),
     sellerProductMediaServe: method({ GET: [serveSellerProductMedia] }),

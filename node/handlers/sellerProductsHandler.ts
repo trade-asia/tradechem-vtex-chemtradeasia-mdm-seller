@@ -157,6 +157,28 @@ export async function listSellerProducts(ctx: ServiceContext<Clients>) {
   }
 }
 
+// POST /_v/mdm-seller/products/unpublish?mdmProductId=... — flips an Active
+// product back to Pending Approval. MDM scopes this to the calling seller
+// server-side (403 if not the actual owner), so auth.vtexSellerId is enough;
+// no extra ownership check needed on our end.
+export async function unpublishSellerProduct(ctx: ServiceContext<Clients>) {
+  ctx.status = 200
+  const mdmProductId = (ctx.query as any).mdmProductId as string | undefined
+  if (!mdmProductId) {
+    ctx.body = { success: false, error: 'mdmProductId is required' }
+    return
+  }
+  const auth = await mdmAuth(ctx)
+  if (!auth) return
+
+  try {
+    const result = await ctx.clients.mdm.unpublishProduct(auth.token, mdmProductId, auth.vtexSellerId)
+    ctx.body = { success: true, result }
+  } catch (err: any) {
+    ctx.body = { success: false, error: 'Failed to unpublish product', detail: mdmErrDetail(err) }
+  }
+}
+
 // Routes to MDM's mdm_product_id-keyed endpoints when there's no VTEX link
 // yet (see MdmClient's *ByMdmId methods) — lets sellers add media right
 // after import instead of waiting on admin approval + linking first. Once a

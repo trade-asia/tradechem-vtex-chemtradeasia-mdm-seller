@@ -150,6 +150,21 @@ export class MdmClient extends ExternalClient {
     }
   }
 
+  // POST /vtex/products/{mdm_product_id}/unpublish — flips Active back to
+  // Pending Approval, scoped to the calling seller. Confirmed live
+  // 2026-10-06: 422 if the product isn't currently active, 403 if
+  // vtex_seller_id isn't the product's actual owner. Caller is expected to
+  // let those surface as normal API errors (mdmErrDetail already handles
+  // MDM's { message, errors } envelope the same way as every other call).
+  public async unpublishProduct(token: string, mdmProductId: string, vtexSellerId: string): Promise<any> {
+    const res: any = await this.http.post(
+      this.url(`/vtex/products/${mdmProductId}/unpublish`),
+      { vtex_seller_id: vtexSellerId },
+      { headers: { Authorization: `Bearer ${token}` } }
+    )
+    return res?.data ?? res
+  }
+
   // vtex_product_id is scoped per seller on MDM's side, not global — per MDM
   // (2026-08-13): the uniqueness constraint on their product-link table is
   // (vtex_seller_id, vtex_product_id), so the same numeric id can be a

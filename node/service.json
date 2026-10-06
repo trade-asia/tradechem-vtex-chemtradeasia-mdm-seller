@@ -18,6 +18,10 @@
       "path": "/_v/mdm-seller/products-list",
       "public": true
     },
+    "sellerProductUnpublish": {
+      "path": "/_v/mdm-seller/products/unpublish",
+      "public": true
+    },
     "sellerProductMedia": {
       "path": "/_v/mdm-seller/products/media",
       "public": true
