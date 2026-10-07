@@ -179,6 +179,44 @@ export async function unpublishSellerProduct(ctx: ServiceContext<Clients>) {
   }
 }
 
+// POST /_v/mdm-seller/products/edit-link?mdmProductId=... — issues a fresh,
+// one-time MDM-hosted edit link for one product, scoped to this seller.
+// Never cached: a new link invalidates whatever was issued before it for
+// this product+seller pair, so this is only called right when the seller
+// clicks Edit, same as unpublish is only called right when they click it.
+export async function getSellerEditLink(ctx: ServiceContext<Clients>) {
+  ctx.status = 200
+  const mdmProductId = (ctx.query as any).mdmProductId as string | undefined
+  if (!mdmProductId) {
+    ctx.body = { success: false, error: 'mdmProductId is required' }
+    return
+  }
+  const auth = await mdmAuth(ctx)
+  if (!auth) return
+
+  try {
+    const link = await ctx.clients.mdm.getEditLink(auth.token, mdmProductId, auth.vtexSellerId)
+    ctx.body = { success: true, url: link.url, expiresAt: link.expiresAt }
+  } catch (err: any) {
+    ctx.body = { success: false, error: 'Failed to get edit link', detail: mdmErrDetail(err) }
+  }
+}
+
+// POST /_v/mdm-seller/products/add-link — issues a fresh MDM-hosted link
+// for creating one new product, attributed to this seller once they save it.
+export async function getSellerAddLink(ctx: ServiceContext<Clients>) {
+  ctx.status = 200
+  const auth = await mdmAuth(ctx)
+  if (!auth) return
+
+  try {
+    const link = await ctx.clients.mdm.getAddLink(auth.token, auth.vtexSellerId)
+    ctx.body = { success: true, url: link.url, expiresAt: link.expiresAt }
+  } catch (err: any) {
+    ctx.body = { success: false, error: 'Failed to get add-product link', detail: mdmErrDetail(err) }
+  }
+}
+
 // Routes to MDM's mdm_product_id-keyed endpoints when there's no VTEX link
 // yet (see MdmClient's *ByMdmId methods) — lets sellers add media right
 // after import instead of waiting on admin approval + linking first. Once a

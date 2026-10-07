@@ -22,6 +22,14 @@
       "path": "/_v/mdm-seller/products/unpublish",
       "public": true
     },
+    "sellerProductEditLink": {
+      "path": "/_v/mdm-seller/products/edit-link",
+      "public": true
+    },
+    "sellerProductAddLink": {
+      "path": "/_v/mdm-seller/products/add-link",
+      "public": true
+    },
     "sellerProductMedia": {
       "path": "/_v/mdm-seller/products/media",
       "public": true

@@ -31,7 +31,7 @@ const STATUS_COLORS = {
   rejected: '#dc2626',
 }
 
-const COLS = '1fr 120px 100px 110px 190px'
+const COLS = '1fr 120px 100px 110px 260px'
 
 const parseResponse = async (res) => {
   const text = await res.text()
@@ -551,6 +551,30 @@ const SellerProducts = () => {
   const [unpublishingId, setUnpublishingId] = useState(null)
   const [unpublishError, setUnpublishError] = useState(null)
 
+  // Edit Link / Add Link — per MDM's spec, the cooldown between clicks is
+  // our UI's job, not an API-enforced lock: 30min per-product after an edit
+  // link is issued, 15min per-seller after an add link is issued. Stored as
+  // plain end-timestamps; editLinkError/addLinkError reuse mdmErrDetail's
+  // text via the same success/detail response shape as every other call here.
+  const EDIT_COOLDOWN_MS = 30 * 60 * 1000
+  const ADD_COOLDOWN_MS = 15 * 60 * 1000
+  const [editCooldowns, setEditCooldowns] = useState({}) // { [mdmProductId]: cooldownEndMs }
+  const [editLoadingId, setEditLoadingId] = useState(null)
+  const [editLinkError, setEditLinkError] = useState(null)
+  const [addCooldownUntil, setAddCooldownUntil] = useState(0)
+  const [addLoading, setAddLoading] = useState(false)
+  const [addLinkError, setAddLinkError] = useState(null)
+  // Forces a re-render every 15s while any cooldown is active, so a button
+  // re-enables itself once its cooldown passes without needing an unrelated
+  // state change (filter edit, refresh, etc.) to trigger it.
+  const [, forceCooldownTick] = useState(0)
+  useEffect(() => {
+    const anyActive = addCooldownUntil > Date.now() || Object.values(editCooldowns).some(t => t > Date.now())
+    if (!anyActive) return
+    const id = setInterval(() => forceCooldownTick(t => t + 1), 15000)
+    return () => clearInterval(id)
+  }, [editCooldowns, addCooldownUntil])
+
   const fetchParamsRef = useRef({ page: 1 })
   const debounceRef = useRef(null)
 
@@ -623,6 +647,48 @@ const SellerProducts = () => {
     }
   }
 
+  // Opens a blank tab synchronously, in direct response to the click, then
+  // points it at the real URL once the fetch resolves — fetch-then-open
+  // across an await is a common trigger for popup blockers since the tab
+  // open no longer looks like it's happening inside the user gesture.
+  const handleEditClick = async (product) => {
+    const win = window.open('', '_blank')
+    setEditLoadingId(product.id)
+    setEditLinkError(null)
+    try {
+      const res = await fetch(`${BASE}/products/edit-link?mdmProductId=${encodeURIComponent(product.id)}`, { method: 'POST' })
+      const data = await parseResponse(res)
+      if (!data.success) throw new Error(data.detail ? `${data.error}: ${data.detail}` : data.error)
+      if (win) win.location.href = data.url
+      setEditCooldowns(prev => ({ ...prev, [product.id]: Date.now() + EDIT_COOLDOWN_MS }))
+    } catch (err) {
+      if (win) win.close()
+      setEditLinkError(err.message)
+    } finally {
+      setEditLoadingId(null)
+    }
+  }
+
+  const handleAddClick = async () => {
+    const win = window.open('', '_blank')
+    setAddLoading(true)
+    setAddLinkError(null)
+    try {
+      const res = await fetch(`${BASE}/products/add-link`, { method: 'POST' })
+      const data = await parseResponse(res)
+      if (!data.success) throw new Error(data.detail ? `${data.error}: ${data.detail}` : data.error)
+      if (win) win.location.href = data.url
+      setAddCooldownUntil(Date.now() + ADD_COOLDOWN_MS)
+    } catch (err) {
+      if (win) win.close()
+      setAddLinkError(err.message)
+    } finally {
+      setAddLoading(false)
+    }
+  }
+
+  const addOnCooldown = addCooldownUntil > Date.now()
+
   const totalFrom = total === 0 ? 0 : (page - 1) * PER_PAGE + 1
   const totalTo = Math.min(page * PER_PAGE, total)
 
@@ -633,8 +699,20 @@ const SellerProducts = () => {
           <div style={{ fontSize: 28, fontWeight: 700, color: '#142032', marginBottom: 4 }}>My Products</div>
           <div style={{ fontSize: 14, color: '#666', marginBottom: 24 }}>Your products, synced with MDM.</div>
         </div>
-        <Button variation="primary" onClick={() => setShowImport(true)}>+ Import products</Button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Button
+            variation="primary"
+            onClick={handleAddClick}
+            isLoading={addLoading}
+            disabled={addOnCooldown}
+            title={addOnCooldown ? 'Available again shortly — one Add link is issued at a time per seller.' : undefined}
+          >
+            + Add product
+          </Button>
+          <Button variation="primary" onClick={() => setShowImport(true)}>+ Import products</Button>
+        </div>
       </div>
+      {addLinkError && <div style={{ marginTop: 12 }}><Alert type="error" onClose={() => setAddLinkError(null)}>{addLinkError}</Alert></div>}
 
       <div style={{
         display: 'grid',
@@ -652,6 +730,7 @@ const SellerProducts = () => {
 
       {error && <div style={{ marginBottom: 12 }}><Alert type="error">{error}</Alert></div>}
       {unpublishError && <div style={{ marginBottom: 12 }}><Alert type="error" onClose={() => setUnpublishError(null)}>{unpublishError}</Alert></div>}
+      {editLinkError && <div style={{ marginBottom: 12 }}><Alert type="error" onClose={() => setEditLinkError(null)}>{editLinkError}</Alert></div>}
 
       <div className="mb3" style={{ display: 'flex', flexWrap: 'nowrap', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
         <button
@@ -760,10 +839,23 @@ const SellerProducts = () => {
                 >
                   Media
                 </button>
+                <button
+                  onClick={() => handleEditClick(p)}
+                  disabled={editLoadingId === p.id || (editCooldowns[p.id] ?? 0) > Date.now()}
+                  title={(editCooldowns[p.id] ?? 0) > Date.now() ? 'Available again shortly — one edit link is issued at a time per product.' : 'Edit this product'}
+                  style={{
+                    background: '#fff', border: '1px solid #3f7bbf', borderRadius: 4, padding: '3px 10px',
+                    fontSize: 11, fontWeight: 600, color: '#3f7bbf',
+                    cursor: (editLoadingId === p.id || (editCooldowns[p.id] ?? 0) > Date.now()) ? 'not-allowed' : 'pointer',
+                    opacity: (editLoadingId === p.id || (editCooldowns[p.id] ?? 0) > Date.now()) ? 0.6 : 1,
+                  }}
+                >
+                  {editLoadingId === p.id ? '…' : 'Edit'}
+                </button>
                 {p.status === 'active' && (
                   confirmUnpublishId === p.id ? (
                     <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <span style={{ fontSize: 11, color: '#b45309', fontWeight: 600 }}>Unpublish?</span>
+                      <span style={{ fontSize: 11, color: '#b45309', fontWeight: 600 }}>Revert to Pending?</span>
                       <button
                         onClick={() => handleUnpublish(p)}
                         disabled={unpublishingId === p.id}
@@ -795,7 +887,7 @@ const SellerProducts = () => {
                         fontSize: 11, fontWeight: 600, color: '#b45309', cursor: 'pointer',
                       }}
                     >
-                      Unpublish
+                      Revert to Pending
                     </button>
                   )
                 )}

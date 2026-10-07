@@ -165,6 +165,32 @@ export class MdmClient extends ExternalClient {
     return res?.data ?? res
   }
 
+  // Edit Link / Add Link — per MDM's spec (2026-10-07): issuing a new edit
+  // link for the same product+seller immediately invalidates any link
+  // issued before it for that pair, so these are only ever called right
+  // before handing the URL to the seller, never pre-generated or cached.
+  // Rate limiting and the actual cooldown between clicks are our UI's job
+  // (per that same spec), not something to build in here.
+  public async getEditLink(token: string, mdmProductId: string, vtexSellerId: string): Promise<{ url: string; expiresAt: string }> {
+    const res: any = await this.http.post(
+      this.url(`/vtex/products/${mdmProductId}/edit-link`),
+      { vtex_seller_id: vtexSellerId },
+      { headers: { Authorization: `Bearer ${token}` } }
+    )
+    const data = res?.data ?? res
+    return { url: data?.url, expiresAt: data?.expires_at }
+  }
+
+  public async getAddLink(token: string, vtexSellerId: string): Promise<{ url: string; expiresAt: string }> {
+    const res: any = await this.http.post(
+      this.url('/vtex/products/add-link'),
+      { vtex_seller_id: vtexSellerId },
+      { headers: { Authorization: `Bearer ${token}` } }
+    )
+    const data = res?.data ?? res
+    return { url: data?.url, expiresAt: data?.expires_at }
+  }
+
   // vtex_product_id is scoped per seller on MDM's side, not global — per MDM
   // (2026-08-13): the uniqueness constraint on their product-link table is
   // (vtex_seller_id, vtex_product_id), so the same numeric id can be a
