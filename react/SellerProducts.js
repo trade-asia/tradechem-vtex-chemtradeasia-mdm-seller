@@ -723,6 +723,7 @@ const SellerProducts = () => {
             padding: 0,
             fontSize: 16,
             lineHeight: 1,
+            marginRight: 15,
             cursor: loading ? 'default' : 'pointer',
             color: '#555',
             opacity: loading ? 0.6 : 1,
@@ -738,7 +739,16 @@ const SellerProducts = () => {
             since alignItems:center centers the button against that inflated
             height. Pulling the whole component up by the same 64px cancels
             it back out. */}
-        <div style={{ marginTop: -64 }}>
+        {/* Confirmed live (2026-10-08, via browser inspect) that -64 alone
+            wasn't quite enough — an extra margin-top: 47px on Pagination's
+            own inner ".pt5" row was also needed to land it level with the
+            button. That inner div is rendered by Pagination itself with no
+            prop to style it directly, so the override goes through a scoped
+            <style> tag keyed to this one wrapper's unique class, rather than
+            a global rule that would also hit the second, unrelated
+            Pagination instance below the table. */}
+        <style>{`.seller-products-top-pagination .pt5 { margin-top: 47px; }`}</style>
+        <div className="seller-products-top-pagination" style={{ marginTop: -64 }}>
           <Pagination
             currentItemFrom={totalFrom}
             currentItemTo={totalTo}
