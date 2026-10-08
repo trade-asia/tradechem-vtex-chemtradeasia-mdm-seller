@@ -547,33 +547,17 @@ const SellerProducts = () => {
   const [mediaProduct, setMediaProduct] = useState(null)
   const [showImport, setShowImport] = useState(false)
   const [rejectionProduct, setRejectionProduct] = useState(null)
-  const [confirmUnpublishId, setConfirmUnpublishId] = useState(null)
+  const [confirmUnpublishProduct, setConfirmUnpublishProduct] = useState(null)
   const [unpublishingId, setUnpublishingId] = useState(null)
   const [unpublishError, setUnpublishError] = useState(null)
 
-  // Edit Link / Add Link — per MDM's spec, the cooldown between clicks is
-  // our UI's job, not an API-enforced lock: 30min per-product after an edit
-  // link is issued, 15min per-seller after an add link is issued. Stored as
-  // plain end-timestamps; editLinkError/addLinkError reuse mdmErrDetail's
-  // text via the same success/detail response shape as every other call here.
-  const EDIT_COOLDOWN_MS = 30 * 60 * 1000
-  const ADD_COOLDOWN_MS = 15 * 60 * 1000
-  const [editCooldowns, setEditCooldowns] = useState({}) // { [mdmProductId]: cooldownEndMs }
+  // Edit Link / Add Link — MDM confirmed (2026-10-08) no client-side
+  // debounce is required; their own rate limits are the only backstop. Just
+  // loading/error state per call, no cooldown tracking.
   const [editLoadingId, setEditLoadingId] = useState(null)
   const [editLinkError, setEditLinkError] = useState(null)
-  const [addCooldownUntil, setAddCooldownUntil] = useState(0)
   const [addLoading, setAddLoading] = useState(false)
   const [addLinkError, setAddLinkError] = useState(null)
-  // Forces a re-render every 15s while any cooldown is active, so a button
-  // re-enables itself once its cooldown passes without needing an unrelated
-  // state change (filter edit, refresh, etc.) to trigger it.
-  const [, forceCooldownTick] = useState(0)
-  useEffect(() => {
-    const anyActive = addCooldownUntil > Date.now() || Object.values(editCooldowns).some(t => t > Date.now())
-    if (!anyActive) return
-    const id = setInterval(() => forceCooldownTick(t => t + 1), 15000)
-    return () => clearInterval(id)
-  }, [editCooldowns, addCooldownUntil])
 
   const fetchParamsRef = useRef({ page: 1 })
   const debounceRef = useRef(null)
@@ -638,7 +622,7 @@ const SellerProducts = () => {
       const res = await fetch(`${BASE}/products/unpublish?mdmProductId=${encodeURIComponent(product.id)}`, { method: 'POST' })
       const data = await parseResponse(res)
       if (!data.success) throw new Error(data.detail ? `${data.error}: ${data.detail}` : data.error)
-      setConfirmUnpublishId(null)
+      setConfirmUnpublishProduct(null)
       doFetch()
     } catch (err) {
       setUnpublishError(err.message)
@@ -660,7 +644,6 @@ const SellerProducts = () => {
       const data = await parseResponse(res)
       if (!data.success) throw new Error(data.detail ? `${data.error}: ${data.detail}` : data.error)
       if (win) win.location.href = data.url
-      setEditCooldowns(prev => ({ ...prev, [product.id]: Date.now() + EDIT_COOLDOWN_MS }))
     } catch (err) {
       if (win) win.close()
       setEditLinkError(err.message)
@@ -678,7 +661,6 @@ const SellerProducts = () => {
       const data = await parseResponse(res)
       if (!data.success) throw new Error(data.detail ? `${data.error}: ${data.detail}` : data.error)
       if (win) win.location.href = data.url
-      setAddCooldownUntil(Date.now() + ADD_COOLDOWN_MS)
     } catch (err) {
       if (win) win.close()
       setAddLinkError(err.message)
@@ -686,8 +668,6 @@ const SellerProducts = () => {
       setAddLoading(false)
     }
   }
-
-  const addOnCooldown = addCooldownUntil > Date.now()
 
   const totalFrom = total === 0 ? 0 : (page - 1) * PER_PAGE + 1
   const totalTo = Math.min(page * PER_PAGE, total)
@@ -700,16 +680,10 @@ const SellerProducts = () => {
           <div style={{ fontSize: 14, color: '#666', marginBottom: 24 }}>Your products, synced with MDM.</div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <Button
-            variation="primary"
-            onClick={handleAddClick}
-            isLoading={addLoading}
-            disabled={addOnCooldown}
-            title={addOnCooldown ? 'Available again shortly — one Add link is issued at a time per seller.' : undefined}
-          >
+          <Button variation="secondary" onClick={() => setShowImport(true)}>+ Import products</Button>
+          <Button variation="primary" onClick={handleAddClick} isLoading={addLoading}>
             + Add product
           </Button>
-          <Button variation="primary" onClick={() => setShowImport(true)}>+ Import products</Button>
         </div>
       </div>
       {addLinkError && <div style={{ marginTop: 12 }}><Alert type="error" onClose={() => setAddLinkError(null)}>{addLinkError}</Alert></div>}
@@ -729,7 +703,6 @@ const SellerProducts = () => {
       </div>
 
       {error && <div style={{ marginBottom: 12 }}><Alert type="error">{error}</Alert></div>}
-      {unpublishError && <div style={{ marginBottom: 12 }}><Alert type="error" onClose={() => setUnpublishError(null)}>{unpublishError}</Alert></div>}
       {editLinkError && <div style={{ marginBottom: 12 }}><Alert type="error" onClose={() => setEditLinkError(null)}>{editLinkError}</Alert></div>}
 
       <div className="mb3" style={{ display: 'flex', flexWrap: 'nowrap', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
@@ -841,55 +814,28 @@ const SellerProducts = () => {
                 </button>
                 <button
                   onClick={() => handleEditClick(p)}
-                  disabled={editLoadingId === p.id || (editCooldowns[p.id] ?? 0) > Date.now()}
-                  title={(editCooldowns[p.id] ?? 0) > Date.now() ? 'Available again shortly — one edit link is issued at a time per product.' : 'Edit this product'}
+                  disabled={editLoadingId === p.id}
+                  title="Edit this product"
                   style={{
                     background: '#fff', border: '1px solid #3f7bbf', borderRadius: 4, padding: '3px 10px',
                     fontSize: 11, fontWeight: 600, color: '#3f7bbf',
-                    cursor: (editLoadingId === p.id || (editCooldowns[p.id] ?? 0) > Date.now()) ? 'not-allowed' : 'pointer',
-                    opacity: (editLoadingId === p.id || (editCooldowns[p.id] ?? 0) > Date.now()) ? 0.6 : 1,
+                    cursor: editLoadingId === p.id ? 'not-allowed' : 'pointer',
+                    opacity: editLoadingId === p.id ? 0.6 : 1,
                   }}
                 >
                   {editLoadingId === p.id ? '…' : 'Edit'}
                 </button>
                 {p.status === 'active' && (
-                  confirmUnpublishId === p.id ? (
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <span style={{ fontSize: 11, color: '#b45309', fontWeight: 600 }}>Revert to Pending?</span>
-                      <button
-                        onClick={() => handleUnpublish(p)}
-                        disabled={unpublishingId === p.id}
-                        style={{
-                          background: '#b45309', border: 'none', borderRadius: 4, padding: '3px 8px',
-                          fontSize: 11, fontWeight: 600, color: '#fff',
-                          cursor: unpublishingId === p.id ? 'not-allowed' : 'pointer',
-                        }}
-                      >
-                        {unpublishingId === p.id ? '…' : 'Yes'}
-                      </button>
-                      <button
-                        onClick={() => setConfirmUnpublishId(null)}
-                        disabled={unpublishingId === p.id}
-                        style={{
-                          background: '#fff', border: '1px solid #ccc', borderRadius: 4, padding: '3px 8px',
-                          fontSize: 11, color: '#555', cursor: 'pointer',
-                        }}
-                      >
-                        Cancel
-                      </button>
-                    </span>
-                  ) : (
-                    <button
-                      onClick={() => setConfirmUnpublishId(p.id)}
-                      title="Revert to Pending Approval"
-                      style={{
-                        background: '#fff', border: '1px solid #b45309', borderRadius: 4, padding: '3px 10px',
-                        fontSize: 11, fontWeight: 600, color: '#b45309', cursor: 'pointer',
-                      }}
-                    >
-                      Revert to Pending
-                    </button>
-                  )
+                  <button
+                    onClick={() => setConfirmUnpublishProduct(p)}
+                    title="Revert to Pending Approval"
+                    style={{
+                      background: '#fff', border: '1px solid #b45309', borderRadius: 4, padding: '3px 10px',
+                      fontSize: 11, fontWeight: 600, color: '#b45309', cursor: 'pointer',
+                    }}
+                  >
+                    Revert to Pending
+                  </button>
                 )}
               </div>
             </div>
@@ -910,6 +856,40 @@ const SellerProducts = () => {
 
       {mediaProduct && <MediaModal product={mediaProduct} onClose={() => setMediaProduct(null)} />}
       {rejectionProduct && <RejectionReasonModal product={rejectionProduct} onClose={() => setRejectionProduct(null)} />}
+      {confirmUnpublishProduct && (
+        <Modal
+          isOpen
+          centered
+          onClose={() => { setConfirmUnpublishProduct(null); setUnpublishError(null) }}
+          title="Revert to Pending Approval"
+        >
+          <div style={{ minWidth: 600, maxWidth: 700 }}>
+            <div style={{ fontWeight: 600, color: '#142032', fontSize: 13, marginBottom: 12 }}>
+              {confirmUnpublishProduct.name}
+            </div>
+            <div style={{ fontSize: 13, color: '#475569', marginBottom: 16 }}>
+              This reverts the product's status back to Pending Approval for MDM to re-review. Are you sure you want to continue?
+            </div>
+            {unpublishError && <div style={{ marginBottom: 12 }}><Alert type="error">{unpublishError}</Alert></div>}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <Button
+                variation="tertiary"
+                onClick={() => { setConfirmUnpublishProduct(null); setUnpublishError(null) }}
+                disabled={unpublishingId === confirmUnpublishProduct.id}
+              >
+                Cancel
+              </Button>
+              <Button
+                variation="danger"
+                onClick={() => handleUnpublish(confirmUnpublishProduct)}
+                isLoading={unpublishingId === confirmUnpublishProduct.id}
+              >
+                Revert to Pending
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
       {showImport && (
         <ImportModal
           onClose={() => setShowImport(false)}
