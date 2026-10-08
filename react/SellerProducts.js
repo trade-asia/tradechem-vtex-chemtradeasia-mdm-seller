@@ -877,8 +877,12 @@ const SellerProducts = () => {
             <div style={{ fontWeight: 600, color: '#142032', fontSize: 13, marginBottom: 12 }}>
               {confirmUnpublishProduct.name}
             </div>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+              <Tag bgColor="#3b82f6" color="#fff">Pending Approval — MDM</Tag>
+              <Tag bgColor="#dc2626" color="#fff">Delisted from TradeChem Marketplace</Tag>
+            </div>
             <div style={{ fontSize: 13, color: '#475569', marginBottom: 16 }}>
-              This reverts the product's status back to Pending Approval for MDM to re-review. Are you sure you want to continue?
+              This reverts the product's status back to Pending Approval in MDM for re-review, and is intended to remove it from the live TradeChem Marketplace storefront. Are you sure you want to continue?
             </div>
             {unpublishError && <div style={{ marginBottom: 12 }}><Alert type="error">{unpublishError}</Alert></div>}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
