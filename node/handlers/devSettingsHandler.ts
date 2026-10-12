@@ -161,13 +161,23 @@ export async function readMdmConfig(ctx: ServiceContext<Clients>): Promise<any> 
     diag.push(`getAppSettings threw: ${err?.message}`)
   }
 
-  if (settings?.mdmUsername && settings?.mdmPassword) return settings
-  diag.push('own app settings: empty')
+  // Require vtexAppKey/vtexAppToken too, not just mdmUsername/mdmPassword —
+  // a cache populated before those fields existed in the shared-config
+  // payload (or before this account ever successfully fetched them) would
+  // otherwise keep returning that incomplete blob forever, since nothing
+  // else ever invalidates it. Confirmed live 2026-10-12 as a real bug: an
+  // account's cached settings had mdmUsername but no VTEX keys, so every
+  // VTEX-status/deactivate call failed with "VTEX API keys not configured"
+  // despite MDM's shared-config endpoint actually having them.
+  const isComplete = (s: any) => s?.mdmUsername && s?.mdmPassword && s?.vtexAppKey && s?.vtexAppToken
+
+  if (isComplete(settings)) return settings
+  diag.push('own app settings: empty or missing vtex keys')
 
   try {
     const devConfig = await ctx.clients.vbase.getJSON<any>(DEV_CONFIG_BUCKET, DEV_CONFIG_KEY, true)
-    if (devConfig?.mdmUsername) return devConfig
-    diag.push('vbase dev config: empty')
+    if (isComplete(devConfig)) return devConfig
+    diag.push('vbase dev config: empty or missing vtex keys')
   } catch (err: any) {
     diag.push(`vbase dev config threw: ${err?.message}`)
   }
