@@ -54,6 +54,10 @@
       "path": "/_v/mdm-seller/dev/settings",
       "public": true
     },
+    "testVtexCrossAccount": {
+      "path": "/_v/mdm-seller/dev/test-vtex-cross-account",
+      "public": true
+    },
     "manualCapture": {
       "path": "/_v/mdm-seller/capture",
       "public": true
