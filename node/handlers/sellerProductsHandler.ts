@@ -4,6 +4,7 @@ import { Clients } from '../clients'
 import { getMdmToken, clearMdmToken } from '../helpers/getMdmToken'
 import { ensureSellerSynced } from '../helpers/sellerSync'
 import { readMdmConfig } from './devSettingsHandler'
+import { deactivateMarketplaceVtexProduct, getMarketplaceVtexProductStatus } from '../helpers/marketplaceVtexClient'
 
 async function readSettings(ctx: ServiceContext<Clients>): Promise<any | null> {
   const settings = await readMdmConfig(ctx)
@@ -164,6 +165,7 @@ export async function listSellerProducts(ctx: ServiceContext<Clients>) {
 export async function unpublishSellerProduct(ctx: ServiceContext<Clients>) {
   ctx.status = 200
   const mdmProductId = (ctx.query as any).mdmProductId as string | undefined
+  const vtexProductId = (ctx.query as any).vtexProductId as string | undefined
   if (!mdmProductId) {
     ctx.body = { success: false, error: 'mdmProductId is required' }
     return
@@ -171,12 +173,68 @@ export async function unpublishSellerProduct(ctx: ServiceContext<Clients>) {
   const auth = await mdmAuth(ctx)
   if (!auth) return
 
+  let result: any
   try {
-    const result = await ctx.clients.mdm.unpublishProduct(auth.token, mdmProductId, auth.vtexSellerId)
-    ctx.body = { success: true, result }
+    result = await ctx.clients.mdm.unpublishProduct(auth.token, mdmProductId, auth.vtexSellerId)
   } catch (err: any) {
     ctx.body = { success: false, error: 'Failed to unpublish product', detail: mdmErrDetail(err) }
+    return
   }
+
+  // MDM side succeeded. Confirmed live 2026-10-12 that this app's own
+  // sandbox can call tradeasiab2b's native VTEX Catalog API directly with
+  // the keys fetched via the shared-config relay — no need to wait on
+  // MDM's webhook for this particular path (that's only the backstop for
+  // cases neither app is ever told about, e.g. MDM's own admin CSV
+  // reimport). Deactivate the linked VTEX product in the same request.
+  if (!vtexProductId) {
+    ctx.body = { success: true, result }
+    return
+  }
+
+  const settings = await readMdmConfig(ctx)
+  const { vtexAppKey, vtexAppToken } = settings
+  if (!vtexAppKey || !vtexAppToken) {
+    ctx.body = { success: true, result, vtexDeactivateError: 'VTEX API keys not configured' }
+    return
+  }
+
+  const deactivation = await deactivateMarketplaceVtexProduct(vtexAppKey, vtexAppToken, vtexProductId)
+  if (!deactivation.success) {
+    ctx.body = { success: true, result, vtexDeactivateError: deactivation.detail ?? deactivation.error }
+    return
+  }
+
+  ctx.body = { success: true, result, vtexDeactivated: true }
+}
+
+// GET /_v/mdm-seller/products/vtex-status?vtexProductId=... — read-only
+// live check of the linked VTEX product's actual Active/Inactive state,
+// since MDM's own status field can't be trusted alone to reflect it (see
+// ProductStatusModal.js). No seller-ownership check needed: read-only,
+// and the vtexProductId only ever reaches the client already scoped to one
+// of this seller's own linked products.
+export async function getVtexProductStatusHandler(ctx: ServiceContext<Clients>) {
+  ctx.status = 200
+  const vtexProductId = (ctx.query as any).vtexProductId as string | undefined
+  if (!vtexProductId) {
+    ctx.body = { success: false, error: 'vtexProductId is required' }
+    return
+  }
+
+  const settings = await readMdmConfig(ctx)
+  const { vtexAppKey, vtexAppToken } = settings
+  if (!vtexAppKey || !vtexAppToken) {
+    ctx.body = { success: false, error: 'VTEX API keys not configured' }
+    return
+  }
+
+  const result = await getMarketplaceVtexProductStatus(vtexAppKey, vtexAppToken, vtexProductId)
+  if (!result.success) {
+    ctx.body = { success: false, error: 'Failed to check VTEX status', detail: result.error }
+    return
+  }
+  ctx.body = { success: true, isActive: result.isActive, name: result.name }
 }
 
 // POST /_v/mdm-seller/products/edit-link?mdmProductId=... — issues a fresh,

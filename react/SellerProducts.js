@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import ReactDOM from 'react-dom'
 import { Spinner, Alert, Input, Dropdown, Button, Modal, Tag, Pagination } from 'vtex.styleguide'
+import RowActionMenu from './RowActionMenu'
+import ProductStatusModal from './ProductStatusModal'
 
 const BASE = '/_v/mdm-seller'
 const PER_PAGE = 20
@@ -31,7 +33,19 @@ const STATUS_COLORS = {
   rejected: '#dc2626',
 }
 
-const COLS = '1fr 120px 100px 110px 260px'
+// SKU/Actions columns folded into the Product cell (details grid + a single
+// RowActionMenu below it) — same layout as the marketplace admin table.
+const COLS = '1fr 110px 140px'
+
+const L = ({ c }) => (
+  <span style={{ fontSize: 11, fontWeight: 700, color: '#666' }}>{c}</span>
+)
+const Sep = () => (
+  <span style={{ fontSize: 11, color: '#ccc', padding: '0 3px' }}>:</span>
+)
+const V = ({ c }) => (
+  <span style={{ fontSize: 11, color: '#333', fontFamily: 'monospace' }}>{c || '-'}</span>
+)
 
 const parseResponse = async (res) => {
   const text = await res.text()
@@ -609,6 +623,17 @@ const SellerProducts = () => {
   const [confirmUnpublishProduct, setConfirmUnpublishProduct] = useState(null)
   const [unpublishingId, setUnpublishingId] = useState(null)
   const [unpublishError, setUnpublishError] = useState(null)
+  const [unpublishDone, setUnpublishDone] = useState(false)
+
+  // Live VTEX status — MDM's own status field can't be trusted alone to
+  // reflect whether the linked VTEX product is actually Active/Inactive
+  // (that's the whole gap this session's deactivation work closes). Shared
+  // between the standalone status-check (click the Status tag) and the
+  // Revert to Pending confirm, which shows it live too.
+  const [statusCheckProduct, setStatusCheckProduct] = useState(null)
+  const [vtexStatusLoading, setVtexStatusLoading] = useState(false)
+  const [vtexStatusError, setVtexStatusError] = useState(null)
+  const [vtexStatusData, setVtexStatusData] = useState(null)
 
   // Edit Link / Add Link — MDM confirmed (2026-10-08) no client-side
   // debounce is required; their own rate limits are the only backstop. Just
@@ -678,16 +703,57 @@ const SellerProducts = () => {
     setUnpublishingId(product.id)
     setUnpublishError(null)
     try {
-      const res = await fetch(`${BASE}/products/unpublish?mdmProductId=${encodeURIComponent(product.id)}`, { method: 'POST' })
+      const params = new URLSearchParams({ mdmProductId: product.id })
+      if (product.vtex?.vtex_product_id) params.set('vtexProductId', product.vtex.vtex_product_id)
+      const res = await fetch(`${BASE}/products/unpublish?${params.toString()}`, { method: 'POST' })
       const data = await parseResponse(res)
       if (!data.success) throw new Error(data.detail ? `${data.error}: ${data.detail}` : data.error)
-      setConfirmUnpublishProduct(null)
       doFetch()
+      // MDM side succeeded — vtexDeactivateError means only the VTEX-side
+      // deactivation failed. Keep the modal open with a "done" state
+      // (single Close, no re-triggering the already-Pending MDM call)
+      // instead of closing it, same as the marketplace admin's version.
+      if (data.vtexDeactivateError) {
+        setUnpublishError(`Reverted to Pending in MDM, but deactivating the VTEX product failed: ${data.vtexDeactivateError}`)
+        setUnpublishDone(true)
+        return
+      }
+      setConfirmUnpublishProduct(null)
     } catch (err) {
       setUnpublishError(err.message)
     } finally {
       setUnpublishingId(null)
     }
+  }
+
+  // Shared by the standalone Status-tag click and the Revert to Pending
+  // confirm — both need the same live read of the linked VTEX product.
+  const fetchVtexStatus = async (product) => {
+    setVtexStatusData(null)
+    setVtexStatusError(null)
+    if (!product.vtex?.vtex_product_id) return
+    setVtexStatusLoading(true)
+    try {
+      const res = await fetch(`${BASE}/products/vtex-status?vtexProductId=${encodeURIComponent(product.vtex.vtex_product_id)}`)
+      const data = await parseResponse(res)
+      if (!data.success) throw new Error(data.detail ? `${data.error}: ${data.detail}` : data.error)
+      setVtexStatusData(data)
+    } catch (err) {
+      setVtexStatusError(err.message)
+    } finally {
+      setVtexStatusLoading(false)
+    }
+  }
+
+  const handleStatusClick = (product) => {
+    setStatusCheckProduct(product)
+    fetchVtexStatus(product)
+  }
+
+  const handleRevertClick = (product) => {
+    setConfirmUnpublishProduct(product)
+    setUnpublishDone(false)
+    fetchVtexStatus(product)
   }
 
   // Opens a blank tab synchronously, in direct response to the click, then
@@ -826,10 +892,8 @@ const SellerProducts = () => {
           color: '#6b7c93', letterSpacing: '0.6px', textTransform: 'uppercase',
         }}>
           <div>Product</div>
-          <div>SKU</div>
           <div>Status</div>
           <div>VTEX Link</div>
-          <div>Actions</div>
         </div>
 
         {loading ? (
@@ -839,19 +903,51 @@ const SellerProducts = () => {
             No products match your filters.
           </div>
         ) : (
-          products.map((p, idx) => (
+          products.map((p, idx) => {
+            const origin = p.origin_countries?.length
+              ? p.origin_countries.map(c => c.name).join(', ')
+              : null
+            return (
             <div
               key={p.id ?? idx}
               style={{
-                display: 'grid', gridTemplateColumns: COLS, gap: '0 16px', padding: '12px 16px',
-                borderBottom: '1px solid #eee', alignItems: 'center',
+                display: 'grid', gridTemplateColumns: COLS, gap: '0 16px', padding: '14px 16px',
+                borderBottom: '1px solid #eee', alignItems: 'start',
                 background: idx % 2 === 0 ? '#fff' : '#fafcfe',
               }}
             >
-              <div style={{ fontWeight: 600, fontSize: 13, color: '#142032' }}>{p.name}</div>
-              <div style={{ fontSize: 12, fontFamily: 'monospace', color: '#444' }}>{p.sku}</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Tag bgColor={STATUS_COLORS[p.status] ?? '#9E9E9E'} color="#fff">{p.status}</Tag>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 13, color: '#142032', marginBottom: 7 }}>{p.name}</div>
+                <div style={{
+                  display: 'grid', gridTemplateColumns: 'max-content max-content minmax(0,1fr)',
+                  rowGap: 4, alignItems: 'baseline',
+                }}>
+                  <L c="SKU" /><Sep /><V c={p.sku} />
+                  <L c="CAS" /><Sep /><V c={p.cas_number} />
+                  <L c="HS" /><Sep /><V c={p.hs_code} />
+                  <L c="Origin" /><Sep /><V c={origin} />
+                </div>
+                <div style={{ marginTop: 8 }}>
+                  <RowActionMenu
+                    label="Action"
+                    buttonProps={{ variation: 'secondary', size: 'small' }}
+                    options={[
+                      { label: 'Media', onClick: () => setMediaProduct(p) },
+                      { label: editLoadingId === p.id ? 'Opening…' : 'Edit', onClick: () => handleEditClick(p) },
+                      ...(p.status === 'rejected'
+                        ? [{ label: 'View rejection reason', onClick: () => setRejectionProduct(p) }]
+                        : []),
+                      ...(p.status === 'active'
+                        ? [{ label: 'Revert to Pending', onClick: () => handleRevertClick(p), isDangerous: true }]
+                        : []),
+                    ]}
+                  />
+                </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingTop: 2 }}>
+                <span onClick={() => handleStatusClick(p)} style={{ cursor: 'pointer' }} title="Click to check live MDM + VTEX status">
+                  <Tag bgColor={STATUS_COLORS[p.status] ?? '#9E9E9E'} color="#fff">{p.status}</Tag>
+                </span>
                 {p.status === 'rejected' && (
                   <button
                     onClick={() => setRejectionProduct(p)}
@@ -868,47 +964,12 @@ const SellerProducts = () => {
                   </button>
                 )}
               </div>
-              <div style={{ fontSize: 12, color: '#666' }}>
+              <div style={{ fontSize: 12, color: '#666', paddingTop: 2 }}>
                 {p.vtex?.linked ? `Linked - ${p.vtex.vtex_product_id}` : 'Not linked'}
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                <button
-                  onClick={() => setMediaProduct(p)}
-                  style={{
-                    background: '#fff', border: '1px solid #9333ea', borderRadius: 4, padding: '3px 10px',
-                    fontSize: 11, fontWeight: 600, color: '#9333ea', cursor: 'pointer',
-                  }}
-                >
-                  Media
-                </button>
-                <button
-                  onClick={() => handleEditClick(p)}
-                  disabled={editLoadingId === p.id}
-                  title="Edit this product"
-                  style={{
-                    background: '#fff', border: '1px solid #3f7bbf', borderRadius: 4, padding: '3px 10px',
-                    fontSize: 11, fontWeight: 600, color: '#3f7bbf',
-                    cursor: editLoadingId === p.id ? 'not-allowed' : 'pointer',
-                    opacity: editLoadingId === p.id ? 0.6 : 1,
-                  }}
-                >
-                  {editLoadingId === p.id ? '…' : 'Edit'}
-                </button>
-                {p.status === 'active' && (
-                  <button
-                    onClick={() => setConfirmUnpublishProduct(p)}
-                    title="Revert to Pending Approval"
-                    style={{
-                      background: '#fff', border: '1px solid #b45309', borderRadius: 4, padding: '3px 10px',
-                      fontSize: 11, fontWeight: 600, color: '#b45309', cursor: 'pointer',
-                    }}
-                  >
-                    Revert to Pending
-                  </button>
-                )}
-              </div>
             </div>
-          ))
+            )
+          })
         )}
       </div>
 
@@ -929,7 +990,7 @@ const SellerProducts = () => {
         <Modal
           isOpen
           centered
-          onClose={() => { setConfirmUnpublishProduct(null); setUnpublishError(null) }}
+          onClose={() => { setConfirmUnpublishProduct(null); setUnpublishError(null); setUnpublishDone(false) }}
           title="Revert to Pending Approval"
         >
           <div style={{ minWidth: 600, maxWidth: 700 }}>
@@ -940,28 +1001,63 @@ const SellerProducts = () => {
               <Tag bgColor="#3b82f6" color="#fff">Pending Approval — MDM</Tag>
               <Tag bgColor="#dc2626" color="#fff">Delisted from TradeChem Marketplace</Tag>
             </div>
-            <div style={{ fontSize: 13, color: '#475569', marginBottom: 16 }}>
-              This reverts the product's status back to Pending Approval in MDM for re-review, and is intended to remove it from the live TradeChem Marketplace storefront. Are you sure you want to continue?
+            {/* Live current VTEX status, fetched when this modal opens — this app
+                can now deactivate the VTEX product directly (confirmed live
+                2026-10-12), so this isn't just the post-action intent anymore,
+                it's what's about to actually happen. */}
+            <div style={{ fontSize: 12, color: '#475569', marginBottom: 14 }}>
+              Current VTEX status:{' '}
+              {!confirmUnpublishProduct.vtex?.vtex_product_id ? (
+                <span style={{ color: '#999' }}>not linked — nothing to deactivate on VTEX</span>
+              ) : vtexStatusLoading ? (
+                <Spinner size={14} />
+              ) : vtexStatusError ? (
+                <span style={{ color: '#dc2626' }}>couldn't check — {vtexStatusError}</span>
+              ) : (
+                <Tag bgColor={vtexStatusData?.isActive ? '#8BC34A' : '#9E9E9E'} color="#fff">
+                  {vtexStatusData?.isActive ? 'active' : 'inactive'}
+                </Tag>
+              )}
             </div>
-            {unpublishError && <div style={{ marginBottom: 12 }}><Alert type="error">{unpublishError}</Alert></div>}
+            <div style={{ fontSize: 13, color: '#475569', marginBottom: 16 }}>
+              This reverts the product's status back to Pending Approval in MDM for re-review. If it's linked to a VTEX product, that product is also deactivated and removed from the live TradeChem Marketplace storefront. Are you sure you want to continue?
+            </div>
+            {unpublishError && <div style={{ marginBottom: 12 }}><Alert type={unpublishDone ? 'warning' : 'error'}>{unpublishError}</Alert></div>}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <Button
-                variation="tertiary"
-                onClick={() => { setConfirmUnpublishProduct(null); setUnpublishError(null) }}
-                disabled={unpublishingId === confirmUnpublishProduct.id}
-              >
-                Cancel
-              </Button>
-              <Button
-                variation="danger"
-                onClick={() => handleUnpublish(confirmUnpublishProduct)}
-                isLoading={unpublishingId === confirmUnpublishProduct.id}
-              >
-                Revert to Pending
-              </Button>
+              {unpublishDone ? (
+                <Button variation="primary" onClick={() => { setConfirmUnpublishProduct(null); setUnpublishError(null); setUnpublishDone(false) }}>
+                  Close
+                </Button>
+              ) : (
+                <>
+                  <Button
+                    variation="tertiary"
+                    onClick={() => { setConfirmUnpublishProduct(null); setUnpublishError(null) }}
+                    disabled={unpublishingId === confirmUnpublishProduct.id}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    variation="danger"
+                    onClick={() => handleUnpublish(confirmUnpublishProduct)}
+                    isLoading={unpublishingId === confirmUnpublishProduct.id}
+                  >
+                    Revert to Pending
+                  </Button>
+                </>
+              )}
             </div>
           </div>
         </Modal>
+      )}
+      {statusCheckProduct && (
+        <ProductStatusModal
+          product={statusCheckProduct}
+          loading={vtexStatusLoading}
+          error={vtexStatusError}
+          vtexStatus={vtexStatusData}
+          onClose={() => setStatusCheckProduct(null)}
+        />
       )}
       {showImport && (
         <ImportModal

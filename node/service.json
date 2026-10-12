@@ -22,6 +22,10 @@
       "path": "/_v/mdm-seller/products/unpublish",
       "public": true
     },
+    "sellerProductVtexStatus": {
+      "path": "/_v/mdm-seller/products/vtex-status",
+      "public": true
+    },
     "sellerProductEditLink": {
       "path": "/_v/mdm-seller/products/edit-link",
       "public": true
@@ -56,6 +60,10 @@
     },
     "testVtexCrossAccount": {
       "path": "/_v/mdm-seller/dev/test-vtex-cross-account",
+      "public": true
+    },
+    "testGlobalSettingsDirect": {
+      "path": "/_v/mdm-seller/dev/test-global-settings-direct",
       "public": true
     },
     "manualCapture": {

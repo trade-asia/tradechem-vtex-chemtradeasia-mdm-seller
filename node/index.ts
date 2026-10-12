@@ -1,6 +1,6 @@
 import { Service, ServiceContext, ParamsContext, RecorderState, method } from '@vtex/api'
 import { Clients } from './clients'
-import { getSellerProducts, getSellerCountries, listSellerProducts, getSellerProductMedia, addSellerProductMedia, deleteSellerProductMedia, importSellerProducts, serveSellerProductMedia, unpublishSellerProduct, getSellerEditLink, getSellerAddLink } from './handlers/sellerProductsHandler'
+import { getSellerProducts, getSellerCountries, listSellerProducts, getSellerProductMedia, addSellerProductMedia, deleteSellerProductMedia, importSellerProducts, serveSellerProductMedia, unpublishSellerProduct, getSellerEditLink, getSellerAddLink, getVtexProductStatusHandler } from './handlers/sellerProductsHandler'
 import { getSellerDocuments, uploadSellerDocument, deleteSellerDocument } from './handlers/sellerDocumentsHandler'
 import { devReadSettings, devSaveSettings, devDeleteSettings } from './handlers/devSettingsHandler'
 import { catalogCapture, manualCapture, listMyProducts, captureEventLog, inspectProduct } from './handlers/productCaptureHandler'
@@ -8,7 +8,7 @@ import { createSubscriptionCheckout, stripeWebhookHandler, getSubscriptionStatus
 import { getMySubscription, getMySubscriptionPlans, getMySubscriptionInvoices, initMdmSubscriptionCheckout, cancelMySubscription } from './handlers/mdmSubscriptionHandler'
 import { logsHub } from './handlers/logsHubHandler'
 import { debugAdminToken } from './handlers/debugAdminTokenHandler'
-import { testVtexCrossAccount } from './handlers/testVtexCrossAccountHandler'
+import { testVtexCrossAccount, testGlobalSettingsDirect } from './handlers/testVtexCrossAccountHandler'
 import { touchSellerLogin } from './handlers/sellerLoginHandler'
 import { getSellerAccount } from './handlers/sellerAccountHandler'
 
@@ -38,6 +38,7 @@ export default new Service<Clients, State, ParamsContext>({
     sellerCountries: method({ GET: [getSellerCountries] }),
     sellerProductsList: method({ GET: [listSellerProducts] }),
     sellerProductUnpublish: method({ POST: [unpublishSellerProduct] }),
+    sellerProductVtexStatus: method({ GET: [getVtexProductStatusHandler] }),
     sellerProductEditLink: method({ POST: [getSellerEditLink] }),
     sellerProductAddLink: method({ POST: [getSellerAddLink] }),
     sellerProductMedia: method({ GET: [getSellerProductMedia], POST: [addSellerProductMedia], DELETE: [deleteSellerProductMedia] }),
@@ -47,6 +48,7 @@ export default new Service<Clients, State, ParamsContext>({
     sellerDocumentDelete: method({ POST: [deleteSellerDocument] }),
     devSettings: method({ GET: [devReadSettings], POST: [devSaveSettings], DELETE: [devDeleteSettings] }),
     testVtexCrossAccount: method({ GET: [testVtexCrossAccount] }),
+    testGlobalSettingsDirect: method({ GET: [testGlobalSettingsDirect] }),
     manualCapture: method({ GET: [manualCapture] }),
     inspectProduct: method({ GET: [inspectProduct] }),
     myProducts: method({ GET: [listMyProducts] }),
