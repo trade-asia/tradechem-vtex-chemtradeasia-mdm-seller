@@ -312,17 +312,32 @@ const ImportModal = ({ onClose, onImported }) => {
       const skuColIndex = header.indexOf('sku')
       if (skuColIndex === -1) throw new Error('CSV has no "sku" column')
 
-      // Blank SKUs used to pass straight through to MDM, which could either
-      // silently reject the whole batch or process the row with a missing
-      // identifier — easier to catch and block client-side with exact line
-      // numbers than rely on whatever MDM does with it.
-      const blankSkuLines = rows.slice(1)
-        .map((r, i) => (((r[skuColIndex] ?? '').trim()) ? null : i + 2))
-        .filter(Boolean)
-      if (blankSkuLines.length) {
-        throw new Error(
-          `CSV has a blank SKU on line${blankSkuLines.length > 1 ? 's' : ''} ${blankSkuLines.join(', ')} — every row needs a SKU before this can be imported.`
-        )
+      // MDM's bulk CSV endpoint doesn't reject rows missing these — it just
+      // accepts them silently (reported by the client: "CSV import accepts
+      // products with missing required information without throwing any
+      // information"). name/cas_number/hs_code are confirmed required
+      // elsewhere in this system (productCaptureHandler.ts's pre-validation,
+      // importProductHandler.ts), so block them here the same way blank SKU
+      // already is, rather than rely on MDM to catch it.
+      const REQUIRED_COLUMNS = [
+        { key: 'sku', colIndex: skuColIndex, label: 'SKU' },
+        { key: 'name', colIndex: header.indexOf('name'), label: 'Name' },
+        { key: 'cas_number', colIndex: header.indexOf('cas_number'), label: 'CAS Number' },
+        { key: 'hs_code', colIndex: header.indexOf('hs_code'), label: 'HS Code' },
+      ]
+      const missingColumns = REQUIRED_COLUMNS.filter(c => c.colIndex === -1)
+      if (missingColumns.length) {
+        throw new Error(`CSV is missing required column${missingColumns.length > 1 ? 's' : ''}: ${missingColumns.map(c => c.key).join(', ')}`)
+      }
+
+      const rowErrors = rows.slice(1).map((r, i) => {
+        const missing = REQUIRED_COLUMNS.filter(c => !((r[c.colIndex] ?? '').trim())).map(c => c.label)
+        return missing.length ? `line ${i + 2} (missing ${missing.join(', ')})` : null
+      }).filter(Boolean)
+      if (rowErrors.length) {
+        const shown = rowErrors.slice(0, 10)
+        const suffix = rowErrors.length > shown.length ? `; +${rowErrors.length - shown.length} more row(s)` : ''
+        throw new Error(`CSV has rows missing required fields — ${shown.join('; ')}${suffix}`)
       }
 
       const skus = [...new Set(rows.slice(1).map(r => (r[skuColIndex] ?? '').trim()).filter(Boolean))]
