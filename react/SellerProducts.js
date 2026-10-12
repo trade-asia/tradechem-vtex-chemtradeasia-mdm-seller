@@ -312,6 +312,19 @@ const ImportModal = ({ onClose, onImported }) => {
       const skuColIndex = header.indexOf('sku')
       if (skuColIndex === -1) throw new Error('CSV has no "sku" column')
 
+      // Blank SKUs used to pass straight through to MDM, which could either
+      // silently reject the whole batch or process the row with a missing
+      // identifier — easier to catch and block client-side with exact line
+      // numbers than rely on whatever MDM does with it.
+      const blankSkuLines = rows.slice(1)
+        .map((r, i) => (((r[skuColIndex] ?? '').trim()) ? null : i + 2))
+        .filter(Boolean)
+      if (blankSkuLines.length) {
+        throw new Error(
+          `CSV has a blank SKU on line${blankSkuLines.length > 1 ? 's' : ''} ${blankSkuLines.join(', ')} — every row needs a SKU before this can be imported.`
+        )
+      }
+
       const skus = [...new Set(rows.slice(1).map(r => (r[skuColIndex] ?? '').trim()).filter(Boolean))]
       const lookups = await Promise.all(skus.map(async sku => {
         try {
