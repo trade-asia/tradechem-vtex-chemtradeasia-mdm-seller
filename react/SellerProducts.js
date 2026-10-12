@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import ReactDOM from 'react-dom'
 import { Spinner, Alert, Input, Dropdown, Button, Modal, Tag, Pagination } from 'vtex.styleguide'
-import RowActionMenu from './RowActionMenu'
 import ProductStatusModal from './ProductStatusModal'
 
 const BASE = '/_v/mdm-seller'
@@ -33,8 +32,10 @@ const STATUS_COLORS = {
   rejected: '#dc2626',
 }
 
-// SKU/Actions columns folded into the Product cell (details grid + a single
-// RowActionMenu below it) — same layout as the marketplace admin table.
+// SKU column folded into the Product cell's details grid (CAS/HS/Origin
+// already live there) — Actions stays inline below it, not a dropdown menu:
+// only 2-3 actions per row here, so a menu would just add a click without
+// the space savings that's worth it on the admin table's longer list.
 const COLS = '1fr 110px 140px'
 
 const L = ({ c }) => (
@@ -927,21 +928,57 @@ const SellerProducts = () => {
                   <L c="HS" /><Sep /><V c={p.hs_code} />
                   <L c="Origin" /><Sep /><V c={origin} />
                 </div>
-                <div style={{ marginTop: 8 }}>
-                  <RowActionMenu
-                    label="Action"
-                    buttonProps={{ variation: 'secondary', size: 'small' }}
-                    options={[
-                      { label: 'Media', onClick: () => setMediaProduct(p) },
-                      { label: editLoadingId === p.id ? 'Opening…' : 'Edit', onClick: () => handleEditClick(p) },
-                      ...(p.status === 'rejected'
-                        ? [{ label: 'View rejection reason', onClick: () => setRejectionProduct(p) }]
-                        : []),
-                      ...(p.status === 'active'
-                        ? [{ label: 'Revert to Pending', onClick: () => handleRevertClick(p), isDangerous: true }]
-                        : []),
-                    ]}
-                  />
+                {/* A dropdown menu exists to save space when there are many
+                    actions (that's the admin table's situation) — this row
+                    only ever has 2-3, so a menu just adds a click for no
+                    space benefit. Plain inline buttons instead, in the same
+                    spot the menu would have been. */}
+                <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  <button
+                    onClick={() => setMediaProduct(p)}
+                    style={{
+                      background: '#fff', border: '1px solid #9333ea', borderRadius: 4, padding: '3px 10px',
+                      fontSize: 11, fontWeight: 600, color: '#9333ea', cursor: 'pointer',
+                    }}
+                  >
+                    Media
+                  </button>
+                  <button
+                    onClick={() => handleEditClick(p)}
+                    disabled={editLoadingId === p.id}
+                    title="Edit this product"
+                    style={{
+                      background: '#fff', border: '1px solid #3f7bbf', borderRadius: 4, padding: '3px 10px',
+                      fontSize: 11, fontWeight: 600, color: '#3f7bbf',
+                      cursor: editLoadingId === p.id ? 'not-allowed' : 'pointer',
+                      opacity: editLoadingId === p.id ? 0.6 : 1,
+                    }}
+                  >
+                    {editLoadingId === p.id ? '…' : 'Edit'}
+                  </button>
+                  {p.status === 'rejected' && (
+                    <button
+                      onClick={() => setRejectionProduct(p)}
+                      style={{
+                        background: '#fff', border: '1px solid #dc2626', borderRadius: 4, padding: '3px 10px',
+                        fontSize: 11, fontWeight: 600, color: '#dc2626', cursor: 'pointer',
+                      }}
+                    >
+                      View rejection reason
+                    </button>
+                  )}
+                  {p.status === 'active' && (
+                    <button
+                      onClick={() => handleRevertClick(p)}
+                      title="Revert to Pending Approval"
+                      style={{
+                        background: '#fff', border: '1px solid #b45309', borderRadius: 4, padding: '3px 10px',
+                        fontSize: 11, fontWeight: 600, color: '#b45309', cursor: 'pointer',
+                      }}
+                    >
+                      Revert to Pending
+                    </button>
+                  )}
                 </div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingTop: 2 }}>
