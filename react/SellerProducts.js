@@ -501,7 +501,21 @@ const ImportModal = ({ onClose, onImported }) => {
             <input
               type="file"
               accept=".csv,.txt"
-              onChange={e => setFile(e.target.files?.[0] ?? null)}
+              onChange={e => {
+                const f = e.target.files?.[0] ?? null
+                setError(null)
+                // accept=".csv,.txt" only hints the OS picker — it doesn't
+                // block "All Files" overrides, and gave no feedback at all
+                // when a wrong format slipped through (client-reported: no
+                // notification shown for a wrong file format). Check the
+                // extension ourselves and surface it in the same error slot.
+                if (f && !/\.(csv|txt)$/i.test(f.name)) {
+                  setError(`Unsupported file type "${f.name}" — please select a .csv file.`)
+                  setFile(null)
+                  return
+                }
+                setFile(f)
+              }}
             />
           </div>
         )}
