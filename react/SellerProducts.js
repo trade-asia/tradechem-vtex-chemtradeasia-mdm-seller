@@ -340,7 +340,24 @@ const ImportModal = ({ onClose, onImported }) => {
         throw new Error(`CSV has rows missing required fields — ${shown.join('; ')}${suffix}`)
       }
 
-      const skus = [...new Set(rows.slice(1).map(r => (r[skuColIndex] ?? '').trim()).filter(Boolean))]
+      // Duplicate SKUs within the same file used to pass through silently —
+      // the first row created the product, the second quietly overwrote it
+      // on the same import run with no warning (client-reported). Flag and
+      // block instead of letting one row's data silently clobber another's.
+      const allSkus = rows.slice(1).map(r => (r[skuColIndex] ?? '').trim())
+      const skuLines = new Map()
+      allSkus.forEach((sku, i) => {
+        if (!skuLines.has(sku)) skuLines.set(sku, [])
+        skuLines.get(sku).push(i + 2)
+      })
+      const duplicateSkus = [...skuLines.entries()].filter(([, lines]) => lines.length > 1)
+      if (duplicateSkus.length) {
+        const shown = duplicateSkus.slice(0, 10).map(([sku, lines]) => `${sku} (lines ${lines.join(', ')})`)
+        const suffix = duplicateSkus.length > shown.length ? `; +${duplicateSkus.length - shown.length} more` : ''
+        throw new Error(`CSV has duplicate SKUs within the file — ${shown.join('; ')}${suffix}. Each SKU should appear once; remove or merge the duplicate rows before importing.`)
+      }
+
+      const skus = [...new Set(allSkus)]
       const lookups = await Promise.all(skus.map(async sku => {
         try {
           // sku is a partial-match filter server-side — per_page padded well
