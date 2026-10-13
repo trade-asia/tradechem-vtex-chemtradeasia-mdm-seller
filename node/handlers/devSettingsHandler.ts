@@ -205,3 +205,23 @@ export async function readMdmConfig(ctx: ServiceContext<Clients>): Promise<any> 
 
   return { ...(settings ?? {}), _diag: diag }
 }
+
+// Bypasses every cache check in readMdmConfig() above and re-fetches
+// straight from MDM's shared-config relay, overwriting the VBase cache
+// unconditionally. readMdmConfig()'s own cache only guards against fields
+// being *missing* — a cached password that's simply gone stale (rotated on
+// MDM's side) still looks "complete" and keeps being reused, failing MDM
+// login with "Unauthenticated." forever since nothing else invalidates it.
+// Called from mdmAuth() on an auth failure, so a credential rotation on
+// MDM's side self-heals on the very next request instead of needing a
+// manual cache-clear.
+export async function forceRefreshMdmConfig(ctx: ServiceContext<Clients>): Promise<any | null> {
+  try {
+    const globalConfig = await fetchGlobalMdmSettings(ctx)
+    if (!globalConfig?.mdmUsername) return null
+    await ctx.clients.vbase.saveJSON(DEV_CONFIG_BUCKET, DEV_CONFIG_KEY, globalConfig)
+    return globalConfig
+  } catch {
+    return null
+  }
+}

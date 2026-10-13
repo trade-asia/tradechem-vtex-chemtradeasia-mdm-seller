@@ -3,7 +3,7 @@ import axios from 'axios'
 import { Clients } from '../clients'
 import { getMdmToken, clearMdmToken } from '../helpers/getMdmToken'
 import { ensureSellerSynced } from '../helpers/sellerSync'
-import { readMdmConfig } from './devSettingsHandler'
+import { readMdmConfig, forceRefreshMdmConfig } from './devSettingsHandler'
 import { deactivateMarketplaceVtexProduct, getMarketplaceVtexProductStatus } from '../helpers/marketplaceVtexClient'
 
 async function readSettings(ctx: ServiceContext<Clients>): Promise<any | null> {
@@ -109,7 +109,7 @@ interface MdmAuth {
 // here instead of a confusing 422 from MDM.
 async function mdmAuth(ctx: ServiceContext<Clients>): Promise<MdmAuth | null> {
   const settings = await readMdmConfig(ctx)
-  const { mdmApiEndpoint, mdmUsername, mdmPassword } = settings
+  let { mdmApiEndpoint, mdmUsername, mdmPassword } = settings
   if (!mdmUsername || !mdmPassword) {
     ctx.body = {
       success: false,
@@ -119,7 +119,33 @@ async function mdmAuth(ctx: ServiceContext<Clients>): Promise<MdmAuth | null> {
   }
   if (mdmApiEndpoint) ctx.clients.mdm.setBaseUrl(mdmApiEndpoint)
 
-  const token = await getMdmToken(ctx, mdmUsername, mdmPassword)
+  let token: string
+  try {
+    token = await getMdmToken(ctx, mdmUsername, mdmPassword)
+  } catch (err: any) {
+    // Covers both an expired cached token and a password rotated on MDM's
+    // side — readMdmConfig()'s cache only guards against fields being
+    // missing, not against a cached password simply going stale, so a
+    // rotation otherwise keeps failing with "Unauthenticated." forever
+    // until someone clears the cache by hand. Re-fetch fresh from MDM's
+    // shared-config relay and force one new login before giving up.
+    await clearMdmToken(ctx)
+    const fresh = await forceRefreshMdmConfig(ctx)
+    if (!fresh?.mdmUsername || !fresh?.mdmPassword) {
+      ctx.body = { success: false, error: 'MDM authentication failed.', detail: err?.message }
+      return null
+    }
+    mdmUsername = fresh.mdmUsername
+    mdmPassword = fresh.mdmPassword
+    if (fresh.mdmApiEndpoint) ctx.clients.mdm.setBaseUrl(fresh.mdmApiEndpoint)
+    try {
+      token = await getMdmToken(ctx, mdmUsername, mdmPassword, true)
+    } catch (retryErr: any) {
+      ctx.body = { success: false, error: 'MDM authentication failed.', detail: retryErr?.message }
+      return null
+    }
+  }
+
   const userToken: string | undefined = (ctx.vtex as any)?.adminUserAuthToken
   const mdmSellerId = await ensureSellerSynced(ctx as any, token, userToken)
   if (!mdmSellerId) {
@@ -128,6 +154,37 @@ async function mdmAuth(ctx: ServiceContext<Clients>): Promise<MdmAuth | null> {
   }
 
   return { token, baseUrl: ctx.clients.mdm.getBaseUrl(), vtexSellerId: ctx.vtex.account, mdmSellerId }
+}
+
+function looksLikeAuthFailure(err: any): boolean {
+  if (err?.response?.status === 401) return true
+  const msg = String(err?.response?.data?.message ?? err?.message ?? '')
+  return /unauthenticated/i.test(msg)
+}
+
+// The gap mdmAuth()'s own try/catch doesn't cover: a token that was already
+// cached (so getMdmToken returned it without ever calling MDM) can still be
+// dead — MDM revokes outstanding tokens the moment a password rotates,
+// regardless of our own locally-tracked expiry. That only surfaces here, on
+// the actual API call the token is used for, not at login time. Confirmed
+// live 2026-10-13: "Failed to load products: Unauthenticated." on
+// listSellerProducts with a cached token well inside its claimed 24h.
+async function withAuthRetry<T>(
+  ctx: ServiceContext<Clients>,
+  auth: MdmAuth,
+  fn: (auth: MdmAuth) => Promise<T>
+): Promise<T> {
+  try {
+    return await fn(auth)
+  } catch (err: any) {
+    if (!looksLikeAuthFailure(err)) throw err
+    await clearMdmToken(ctx)
+    const fresh = await forceRefreshMdmConfig(ctx)
+    if (!fresh?.mdmUsername || !fresh?.mdmPassword) throw err
+    if (fresh.mdmApiEndpoint) ctx.clients.mdm.setBaseUrl(fresh.mdmApiEndpoint)
+    const freshToken = await getMdmToken(ctx, fresh.mdmUsername, fresh.mdmPassword, true)
+    return await fn({ ...auth, token: freshToken, baseUrl: ctx.clients.mdm.getBaseUrl() })
+  }
 }
 
 // GET /_v/mdm-seller/products-list — the new Products section's own list +
@@ -144,14 +201,14 @@ export async function listSellerProducts(ctx: ServiceContext<Clients>) {
   const perPage = parseInt(q.per_page ?? '20', 10)
 
   try {
-    const result = await ctx.clients.mdm.getSellerProducts(auth.token, auth.mdmSellerId, page, perPage, {
+    const result = await withAuthRetry(ctx, auth, a => ctx.clients.mdm.getSellerProducts(a.token, a.mdmSellerId, page, perPage, {
       status: q.status,
       name: q.name,
       sku: q.sku,
       cas_number: q.cas_number,
       hs_code: q.hs_code,
       vtex_linked: q.vtex_linked,
-    })
+    }))
     ctx.body = { success: true, ...result }
   } catch (err: any) {
     ctx.body = { success: false, error: 'Failed to load products', detail: mdmErrDetail(err) }
@@ -175,7 +232,7 @@ export async function unpublishSellerProduct(ctx: ServiceContext<Clients>) {
 
   let result: any
   try {
-    result = await ctx.clients.mdm.unpublishProduct(auth.token, mdmProductId, auth.vtexSellerId)
+    result = await withAuthRetry(ctx, auth, a => ctx.clients.mdm.unpublishProduct(a.token, mdmProductId, a.vtexSellerId))
   } catch (err: any) {
     ctx.body = { success: false, error: 'Failed to unpublish product', detail: mdmErrDetail(err) }
     return
@@ -253,7 +310,7 @@ export async function getSellerEditLink(ctx: ServiceContext<Clients>) {
   if (!auth) return
 
   try {
-    const link = await ctx.clients.mdm.getEditLink(auth.token, mdmProductId, auth.vtexSellerId)
+    const link = await withAuthRetry(ctx, auth, a => ctx.clients.mdm.getEditLink(a.token, mdmProductId, a.vtexSellerId))
     ctx.body = { success: true, url: link.url, expiresAt: link.expiresAt }
   } catch (err: any) {
     ctx.body = { success: false, error: 'Failed to get edit link', detail: mdmErrDetail(err) }
@@ -268,7 +325,7 @@ export async function getSellerAddLink(ctx: ServiceContext<Clients>) {
   if (!auth) return
 
   try {
-    const link = await ctx.clients.mdm.getAddLink(auth.token, auth.vtexSellerId)
+    const link = await withAuthRetry(ctx, auth, a => ctx.clients.mdm.getAddLink(a.token, a.vtexSellerId))
     ctx.body = { success: true, url: link.url, expiresAt: link.expiresAt }
   } catch (err: any) {
     ctx.body = { success: false, error: 'Failed to get add-product link', detail: mdmErrDetail(err) }
@@ -292,9 +349,9 @@ export async function getSellerProductMedia(ctx: ServiceContext<Clients>) {
   if (!auth) return
 
   try {
-    const media = vtexProductId
-      ? await ctx.clients.mdm.getProductMedia(auth.token, vtexProductId, auth.vtexSellerId)
-      : await ctx.clients.mdm.getProductMediaByMdmId(auth.token, mdmProductId as string, auth.vtexSellerId)
+    const media = await withAuthRetry(ctx, auth, a => vtexProductId
+      ? ctx.clients.mdm.getProductMedia(a.token, vtexProductId, a.vtexSellerId)
+      : ctx.clients.mdm.getProductMediaByMdmId(a.token, mdmProductId as string, a.vtexSellerId))
     // currentSellerId lets the frontend gate the Remove button per-item on
     // media[].vtex_seller_id — belt-and-braces per MDM (2026-08-13): passing
     // vtex_seller_id here already filters the list to this seller's own
@@ -437,13 +494,13 @@ export async function addSellerProductMedia(ctx: ServiceContext<Clients>) {
       contentType: fileContentType,
       base64: fileBuffer.toString('base64'),
     })
-    const result = vtexProductId
-      ? await ctx.clients.mdm.addProductMedia(auth.token, vtexProductId, auth.vtexSellerId, [
+    const result = await withAuthRetry(ctx, auth, a => vtexProductId
+      ? ctx.clients.mdm.addProductMedia(a.token, vtexProductId, a.vtexSellerId, [
           { url: mediaUrl(ctx, key), alt: fileName },
         ])
-      : await ctx.clients.mdm.addProductMediaByMdmId(auth.token, mdmProductId as string, auth.vtexSellerId, [
+      : ctx.clients.mdm.addProductMediaByMdmId(a.token, mdmProductId as string, a.vtexSellerId, [
           { url: mediaUrl(ctx, key), alt: fileName },
-        ])
+        ]))
     ctx.body = { success: true, result }
   } catch (err: any) {
     ctx.body = { success: false, error: 'Failed to add media', detail: mdmErrDetail(err) }
@@ -461,7 +518,7 @@ export async function deleteSellerProductMedia(ctx: ServiceContext<Clients>) {
   if (!auth) return
 
   try {
-    await ctx.clients.mdm.deleteProductMedia(auth.token, mediaId)
+    await withAuthRetry(ctx, auth, a => ctx.clients.mdm.deleteProductMedia(a.token, mediaId))
     ctx.body = { success: true }
   } catch (err: any) {
     ctx.body = { success: false, error: 'Failed to delete media', detail: mdmErrDetail(err) }
@@ -509,19 +566,19 @@ export async function importSellerProducts(ctx: ServiceContext<Clients>) {
   body = appendMultipartField(body, boundary, 'vtex_seller_id', auth.vtexSellerId)
 
   try {
-    const res = await axios.post(
-      `${auth.baseUrl}/vtex/products/import`,
+    const res = await withAuthRetry(ctx, auth, a => axios.post(
+      `${a.baseUrl}/vtex/products/import`,
       body,
       {
         headers: {
-          Authorization: `Bearer ${auth.token}`,
+          Authorization: `Bearer ${a.token}`,
           Accept: 'application/json',
           'Content-Type': contentType,
         },
         maxBodyLength: Infinity,
         timeout: 30000,
       }
-    )
+    ))
     ctx.body = { success: true, result: res.data?.data ?? null }
   } catch (err: any) {
     if (err?.response?.status === 422) {
