@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react'
 import ReactDOM from 'react-dom'
 import { Spinner, Alert, Input, Dropdown, Button, Modal, Tag, Pagination } from 'vtex.styleguide'
 import ProductStatusModal from './ProductStatusModal'
+import DocumentsModal from './DocumentsModal'
 
 const BASE = '/_v/mdm-seller'
 const PER_PAGE = 20
@@ -619,6 +620,7 @@ const SellerProducts = () => {
   const [linkedFilter, setLinkedFilter] = useState('')
 
   const [mediaProduct, setMediaProduct] = useState(null)
+  const [documentsProduct, setDocumentsProduct] = useState(null)
   const [showImport, setShowImport] = useState(false)
   const [rejectionProduct, setRejectionProduct] = useState(null)
   const [confirmUnpublishProduct, setConfirmUnpublishProduct] = useState(null)
@@ -944,6 +946,15 @@ const SellerProducts = () => {
                     Media
                   </button>
                   <button
+                    onClick={() => setDocumentsProduct(p)}
+                    style={{
+                      background: '#fff', border: '1px solid #0891b2', borderRadius: 4, padding: '3px 10px',
+                      fontSize: 11, fontWeight: 600, color: '#0891b2', cursor: 'pointer',
+                    }}
+                  >
+                    Documents
+                  </button>
+                  <button
                     onClick={() => handleEditClick(p)}
                     disabled={editLoadingId === p.id}
                     title="Edit this product"
@@ -1022,6 +1033,7 @@ const SellerProducts = () => {
       </div>
 
       {mediaProduct && <MediaModal product={mediaProduct} onClose={() => setMediaProduct(null)} />}
+      {documentsProduct && <DocumentsModal product={documentsProduct} onClose={() => setDocumentsProduct(null)} />}
       {rejectionProduct && <RejectionReasonModal product={rejectionProduct} onClose={() => setRejectionProduct(null)} />}
       {confirmUnpublishProduct && (
         <Modal

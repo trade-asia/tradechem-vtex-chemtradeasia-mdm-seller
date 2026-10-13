@@ -8,10 +8,6 @@
         "path": "/admin/mdm-seller/products"
       },
       {
-        "labelId": "mdm-seller.navigation.documents",
-        "path": "/admin/mdm-seller/documents"
-      },
-      {
         "labelId": "mdm-seller.navigation.subscription",
         "path": "/admin/mdm-seller/subscription"
       }
