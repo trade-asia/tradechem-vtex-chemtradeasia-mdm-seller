@@ -759,21 +759,21 @@ const SellerProducts = () => {
     fetchVtexStatus(product)
   }
 
-  // Opens a blank tab synchronously, in direct response to the click, then
-  // points it at the real URL once the fetch resolves — fetch-then-open
-  // across an await is a common trigger for popup blockers since the tab
-  // open no longer looks like it's happening inside the user gesture.
+  // Used to open a blank tab synchronously then redirect it once the fetch
+  // resolved, to dodge popup blockers — but that blank/loading tab sat there
+  // for 3-4 seconds with nothing in it, which read as broken rather than
+  // loading. Shows a modal with a spinner in THIS tab while MDM issues the
+  // link instead, and only opens the new tab once there's a real URL to
+  // send it to — nothing to stare at in the meantime.
   const handleEditClick = async (product) => {
-    const win = window.open('', '_blank')
     setEditLoadingId(product.id)
     setEditLinkError(null)
     try {
       const res = await fetch(`${BASE}/products/edit-link?mdmProductId=${encodeURIComponent(product.id)}`, { method: 'POST' })
       const data = await parseResponse(res)
       if (!data.success) throw new Error(data.detail ? `${data.error}: ${data.detail}` : data.error)
-      if (win) win.location.href = data.url
+      window.open(data.url, '_blank')
     } catch (err) {
-      if (win) win.close()
       setEditLinkError(err.message)
     } finally {
       setEditLoadingId(null)
@@ -781,16 +781,14 @@ const SellerProducts = () => {
   }
 
   const handleAddClick = async () => {
-    const win = window.open('', '_blank')
     setAddLoading(true)
     setAddLinkError(null)
     try {
       const res = await fetch(`${BASE}/products/add-link`, { method: 'POST' })
       const data = await parseResponse(res)
       if (!data.success) throw new Error(data.detail ? `${data.error}: ${data.detail}` : data.error)
-      if (win) win.location.href = data.url
+      window.open(data.url, '_blank')
     } catch (err) {
-      if (win) win.close()
       setAddLinkError(err.message)
     } finally {
       setAddLoading(false)
@@ -1032,6 +1030,16 @@ const SellerProducts = () => {
         />
       </div>
 
+      {(editLoadingId !== null || addLoading) && (
+        <Modal isOpen centered onClose={() => {}} title="One moment">
+          <div style={{ minWidth: 360, textAlign: 'center', padding: '12px 0 4px' }}>
+            <Spinner />
+            <div style={{ marginTop: 16, fontSize: 13, color: '#475569' }}>
+              Generating a one-time link…
+            </div>
+          </div>
+        </Modal>
+      )}
       {mediaProduct && <MediaModal product={mediaProduct} onClose={() => setMediaProduct(null)} />}
       {documentsProduct && <DocumentsModal product={documentsProduct} onClose={() => setDocumentsProduct(null)} />}
       {rejectionProduct && <RejectionReasonModal product={rejectionProduct} onClose={() => setRejectionProduct(null)} />}
