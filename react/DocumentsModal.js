@@ -21,7 +21,10 @@ const TYPE_COLORS = {
 }
 
 const MAX_FILE_MB = 20
-const DOC_COLS = '80px 1fr 140px 140px 80px 90px 180px'
+// Narrower than the standalone page's version (which had a whole page width
+// to work with) — this has to fit inside a Modal. Actions column trimmed
+// since only one of "View PDF + Delete" or "Confirm + ✕" ever shows at once.
+const DOC_COLS = '70px 1fr 110px 110px 70px 80px 150px'
 
 const parseResponse = async (res) => {
   const text = await res.text()
@@ -354,8 +357,8 @@ const DocumentsModal = ({ product, onClose }) => {
   return (
     <>
       <Modal isOpen centered onClose={onClose} title="Product documents">
-        <div style={{ minWidth: 800, maxWidth: 950 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <div style={{ minWidth: 650, maxWidth: 820 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
             <div>
               <div style={{ fontWeight: 600, fontSize: 14, color: '#142032' }}>{product.name}</div>
               <div style={{ fontSize: 11, color: '#666' }}>SKU: {product.sku}</div>
