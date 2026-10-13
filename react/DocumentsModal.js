@@ -127,7 +127,12 @@ const UploadDocumentModal = ({ product, isOpen, onClose, onUploaded, countryOpti
 
   return (
     <Modal isOpen={isOpen} centered onClose={handleClose} title="Upload document">
-      <div style={{ minWidth: 460, maxWidth: 520 }}>
+      {/* 460/520 left an uneven gap on the right — the Modal's own rendered
+          frame is wider than that, and the content div isn't auto-centered
+          within it (same issue documented on RejectionReasonModal.js).
+          600/700 is the width already proven not to do this elsewhere in
+          this app. */}
+      <div style={{ minWidth: 600, maxWidth: 700 }}>
         <div style={{
           background: '#f7f9fa', border: '1px solid #e3e4e6', borderRadius: 6,
           padding: '8px 12px', marginBottom: 16, fontSize: 12, color: '#333',
