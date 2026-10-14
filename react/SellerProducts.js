@@ -649,7 +649,18 @@ const SellerProducts = () => {
   const fetchParamsRef = useRef({ page: 1 })
   const debounceRef = useRef(null)
 
-  useEffect(() => { fetch(`${BASE}/touch-login`).catch(() => {}) }, [])
+  // Shown in the banner below — so a stale seller/MDM-id mismatch (like the
+  // constellationgroups411 incident, where the cached mdmSellerId pointed at
+  // the wrong seller) is visible on the page itself, from this always-fresh
+  // force-sync, rather than something only a dev diagnostic could reveal.
+  const [sellerInfo, setSellerInfo] = useState(null)
+
+  useEffect(() => {
+    fetch(`${BASE}/touch-login`)
+      .then(parseResponse)
+      .then(data => { if (data.success) setSellerInfo(data) })
+      .catch(() => {})
+  }, [])
 
   const doFetch = useCallback(async () => {
     const p = fetchParamsRef.current.page
@@ -813,6 +824,19 @@ const SellerProducts = () => {
         </div>
       </div>
       {addLinkError && <div style={{ marginTop: 12 }}><Alert type="error" onClose={() => setAddLinkError(null)}>{addLinkError}</Alert></div>}
+
+      {sellerInfo && (
+        <div style={{
+          display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '4px 16px',
+          fontSize: 12, color: '#475569', background: '#f1f5f9', border: '1px solid #e2e8f0',
+          borderRadius: 4, padding: '6px 12px', margin: '16px 0',
+        }}>
+          <span>Logged in as <strong>{sellerInfo.vtexAccount}</strong></span>
+          {sellerInfo.email && <span>· {sellerInfo.email}</span>}
+          <span>· MDM Seller ID <strong style={{ fontFamily: 'monospace' }}>{sellerInfo.mdmSellerId}</strong></span>
+          <span style={{ color: '#94a3b8' }}>· synced just now</span>
+        </div>
+      )}
 
       <div style={{
         display: 'grid',

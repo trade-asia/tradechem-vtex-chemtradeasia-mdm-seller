@@ -13,7 +13,7 @@ const SELLER_SYNC_REFRESH_MS = 24 * 60 * 60 * 1000
 // individually optional, so email-only (or none, for event-triggered syncs
 // with no user session) is acceptable here. Real names now come from the
 // marketplace app's bulk sync-all-sellers instead (seller-register has them).
-function decodeEmailFromAdminToken(userToken?: string): string | undefined {
+export function decodeEmailFromAdminToken(userToken?: string): string | undefined {
   if (!userToken) return undefined
   try {
     const payload = userToken.split('.')[1]
