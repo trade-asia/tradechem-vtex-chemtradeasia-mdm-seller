@@ -66,6 +66,10 @@
       "path": "/_v/mdm-seller/dev/test-global-settings-direct",
       "public": true
     },
+    "sellerSyncState": {
+      "path": "/_v/mdm-seller/dev/seller-sync-state",
+      "public": true
+    },
     "manualCapture": {
       "path": "/_v/mdm-seller/capture",
       "public": true

@@ -70,6 +70,27 @@ export async function testGlobalSettingsDirect(ctx: ServiceContext<Clients>) {
   }
 }
 
+// ⚠️ DEV/DIAGNOSTIC ONLY.
+//
+// GET /_v/mdm-seller/dev/seller-sync-state
+//
+// Read-only — reports the cached mdm_seller_id this account's product
+// queries actually use (ensureSellerSynced's VBase cache), without needing
+// a real admin session the way touch-login does. Diagnosing "MDM has
+// products for this seller but the dashboard shows an empty list": this
+// confirms or rules out a stale/wrong cached mdm_seller_id before touching
+// any sync logic — same class of bug as the settings cache fixed 2026-10-13.
+export async function sellerSyncState(ctx: ServiceContext<Clients>) {
+  ctx.status = 200
+  let cached: any = null
+  try { cached = await ctx.clients.vbase.getJSON<any>('mdmslr', 'sync', true) } catch {}
+  ctx.body = {
+    runningAccount: ctx.vtex.account,
+    cached,
+    ageHours: cached?.syncedAt ? (Date.now() - new Date(cached.syncedAt).getTime()) / 3600000 : null,
+  }
+}
+
 export async function testVtexCrossAccount(ctx: ServiceContext<Clients>) {
   ctx.status = 200
   const startedAt = Date.now()

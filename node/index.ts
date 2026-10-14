@@ -8,7 +8,7 @@ import { createSubscriptionCheckout, stripeWebhookHandler, getSubscriptionStatus
 import { getMySubscription, getMySubscriptionPlans, getMySubscriptionInvoices, initMdmSubscriptionCheckout, cancelMySubscription } from './handlers/mdmSubscriptionHandler'
 import { logsHub } from './handlers/logsHubHandler'
 import { debugAdminToken } from './handlers/debugAdminTokenHandler'
-import { testVtexCrossAccount, testGlobalSettingsDirect } from './handlers/testVtexCrossAccountHandler'
+import { testVtexCrossAccount, testGlobalSettingsDirect, sellerSyncState } from './handlers/testVtexCrossAccountHandler'
 import { touchSellerLogin } from './handlers/sellerLoginHandler'
 import { getSellerAccount } from './handlers/sellerAccountHandler'
 
@@ -49,6 +49,7 @@ export default new Service<Clients, State, ParamsContext>({
     devSettings: method({ GET: [devReadSettings], POST: [devSaveSettings], DELETE: [devDeleteSettings] }),
     testVtexCrossAccount: method({ GET: [testVtexCrossAccount] }),
     testGlobalSettingsDirect: method({ GET: [testGlobalSettingsDirect] }),
+    sellerSyncState: method({ GET: [sellerSyncState] }),
     manualCapture: method({ GET: [manualCapture] }),
     inspectProduct: method({ GET: [inspectProduct] }),
     myProducts: method({ GET: [listMyProducts] }),
