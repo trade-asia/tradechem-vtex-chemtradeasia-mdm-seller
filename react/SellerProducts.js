@@ -923,7 +923,7 @@ const SellerProducts = () => {
         }}>
           <div>Product</div>
           <div>Status</div>
-          <div>VTEX Link</div>
+          <div title="PID = Tradechem Product ID, SID = Tradechem SKU ID">Tradechem PID / SID</div>
         </div>
 
         {loading ? (
@@ -1043,8 +1043,15 @@ const SellerProducts = () => {
                   </button>
                 )}
               </div>
-              <div style={{ fontSize: 12, color: '#666', paddingTop: 2 }}>
-                {p.vtex?.linked ? `Linked - ${p.vtex.vtex_product_id}` : 'Not linked'}
+              <div style={{ fontSize: 12, color: '#666', paddingTop: 2, fontFamily: 'monospace' }} title="PID = Tradechem Product ID, SID = Tradechem SKU ID">
+                {p.vtex?.linked
+                  // SID shows "-" until MDM's own GET /vtex/products starts
+                  // returning vtex_sku_id on read (their write side already
+                  // accepts it as of 2026-10-15, read side doesn't echo it
+                  // back yet) — this will pick it up automatically the
+                  // moment that's live, no further change needed here.
+                  ? `${p.vtex.vtex_product_id} / ${p.vtex.vtex_sku_id ?? '-'}`
+                  : <span style={{ fontFamily: 'inherit' }}>Not Linked</span>}
               </div>
             </div>
             )
