@@ -6,6 +6,11 @@ import DocumentsModal from './DocumentsModal'
 
 const BASE = '/_v/mdm-seller'
 const PER_PAGE = 20
+// Hidden, not removed (2026-10-18, per explicit instruction) — redundant
+// with the media/document upload MDM's own Edit/Add product screens
+// already have. Flip back to true to restore the buttons; nothing else
+// here was touched (modals, handlers, state all still fully wired).
+const SHOW_MEDIA_DOCUMENTS_BUTTONS = false
 const DEBOUNCE_MS = 500
 const SAMPLE_CSV_URL = 'https://tradeasia.exchange/vtex-product-import-sample.csv'
 
@@ -958,24 +963,28 @@ const SellerProducts = () => {
                     space benefit. Plain inline buttons instead, in the same
                     spot the menu would have been. */}
                 <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                  <button
-                    onClick={() => setMediaProduct(p)}
-                    style={{
-                      background: '#fff', border: '1px solid #9333ea', borderRadius: 4, padding: '3px 10px',
-                      fontSize: 11, fontWeight: 600, color: '#9333ea', cursor: 'pointer',
-                    }}
-                  >
-                    Media
-                  </button>
-                  <button
-                    onClick={() => setDocumentsProduct(p)}
-                    style={{
-                      background: '#fff', border: '1px solid #0891b2', borderRadius: 4, padding: '3px 10px',
-                      fontSize: 11, fontWeight: 600, color: '#0891b2', cursor: 'pointer',
-                    }}
-                  >
-                    Documents
-                  </button>
+                  {SHOW_MEDIA_DOCUMENTS_BUTTONS && (
+                    <>
+                      <button
+                        onClick={() => setMediaProduct(p)}
+                        style={{
+                          background: '#fff', border: '1px solid #9333ea', borderRadius: 4, padding: '3px 10px',
+                          fontSize: 11, fontWeight: 600, color: '#9333ea', cursor: 'pointer',
+                        }}
+                      >
+                        Media
+                      </button>
+                      <button
+                        onClick={() => setDocumentsProduct(p)}
+                        style={{
+                          background: '#fff', border: '1px solid #0891b2', borderRadius: 4, padding: '3px 10px',
+                          fontSize: 11, fontWeight: 600, color: '#0891b2', cursor: 'pointer',
+                        }}
+                      >
+                        Documents
+                      </button>
+                    </>
+                  )}
                   <button
                     onClick={() => handleEditClick(p)}
                     disabled={editLoadingId === p.id}
