@@ -1,9 +1,9 @@
 {
   "vendor": "tradeasiab2b",
   "name": "chemtradeasia-mdm-seller",
-  "version": "1.4.43",
-  "title": "MDM Seller",
-  "description": "Seller-facing MDM features: manage your own SDS / TDS / MSDS documents, with room for future MDM seller tools.",
+  "version": "1.4.44",
+  "title": "MDM Seller Integration",
+  "description": "Seller-facing ChemTradeAsia MDM integration: view your synced products and their Tradechem link status, and manage your MDM subscription plan.",
   "defaultLocale": "en-US",
   "builders": {
     "node": "7.x",
