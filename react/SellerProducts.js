@@ -29,6 +29,17 @@ const VTEX_LINKED_OPTIONS = [
   { value: '0', label: 'Not Linked' },
 ]
 
+// Added by MDM 2026-10-20, at our request.
+const SORT_FIELD_OPTIONS = [
+  { value: '', label: 'Default (recently added)' },
+  { value: 'name', label: 'Name' },
+  { value: 'sku', label: 'SKU' },
+  { value: 'cas_number', label: 'CAS Number' },
+  { value: 'hs_code', label: 'HS Code' },
+  { value: 'status', label: 'Status' },
+  { value: 'created_at', label: 'Date Added' },
+]
+
 const STATUS_COLORS = {
   active: '#8BC34A',
   draft: '#FFB300',
@@ -623,6 +634,10 @@ const SellerProducts = () => {
   const [hsFilter, setHsFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [linkedFilter, setLinkedFilter] = useState('')
+  // sort_direction empty == asc (MDM's own default) — only sent as 'desc'
+  // explicitly, so an all-empty filter set still reads as "no active filters".
+  const [sortBy, setSortBy] = useState('')
+  const [sortDirection, setSortDirection] = useState('')
 
   const [mediaProduct, setMediaProduct] = useState(null)
   const [documentsProduct, setDocumentsProduct] = useState(null)
@@ -682,6 +697,10 @@ const SellerProducts = () => {
       // actually mean that (confirmed live 2026-09-11).
       params.set('status', statusFilter || 'all')
       if (linkedFilter) params.set('vtex_linked', linkedFilter)
+      if (sortBy) {
+        params.set('sort_by', sortBy)
+        params.set('sort_direction', sortDirection || 'asc')
+      }
 
       const res = await fetch(`${BASE}/products-list?${params.toString()}`)
       const data = await parseResponse(res)
@@ -695,7 +714,7 @@ const SellerProducts = () => {
       setLoading(false)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nameFilter, skuFilter, casFilter, hsFilter, statusFilter, linkedFilter])
+  }, [nameFilter, skuFilter, casFilter, hsFilter, statusFilter, linkedFilter, sortBy, sortDirection])
 
   useEffect(() => {
     clearTimeout(debounceRef.current)
@@ -704,7 +723,7 @@ const SellerProducts = () => {
       doFetch()
     }, DEBOUNCE_MS)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nameFilter, skuFilter, casFilter, hsFilter, statusFilter, linkedFilter])
+  }, [nameFilter, skuFilter, casFilter, hsFilter, statusFilter, linkedFilter, sortBy, sortDirection])
 
   const handleNextPage = () => {
     fetchParamsRef.current = { page: page + 1 }
@@ -717,6 +736,18 @@ const SellerProducts = () => {
   const handleRefresh = () => {
     doFetch()
   }
+  const handleClearFilters = () => {
+    setNameFilter('')
+    setSkuFilter('')
+    setCasFilter('')
+    setHsFilter('')
+    setStatusFilter('')
+    setLinkedFilter('')
+    setSortBy('')
+    setSortDirection('')
+  }
+  const handleSortDirectionToggle = () => setSortDirection(d => (d === 'desc' ? '' : 'desc'))
+  const hasActiveFilters = !!(nameFilter || skuFilter || casFilter || hsFilter || statusFilter || linkedFilter || sortBy)
 
   const handleUnpublish = async (product) => {
     setUnpublishingId(product.id)
@@ -845,7 +876,11 @@ const SellerProducts = () => {
 
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+        // Fixed 4 per row rather than auto-fit — auto-fit let everything
+        // cram into one wide row on a large screen instead of a consistent
+        // grid, especially once Sort By/direction were added on top of the
+        // original 6 filters.
+        gridTemplateColumns: 'repeat(4, 1fr)',
         gap: 12,
         marginBottom: 16,
       }}>
@@ -855,63 +890,100 @@ const SellerProducts = () => {
         <Input label="HS Code" placeholder="e.g. 3806.10.00" value={hsFilter} onChange={e => setHsFilter(e.target.value)} />
         <Dropdown label="Status" options={STATUS_OPTIONS} value={statusFilter} onChange={(_, v) => setStatusFilter(v)} />
         <Dropdown label="VTEX Link" options={VTEX_LINKED_OPTIONS} value={linkedFilter} onChange={(_, v) => setLinkedFilter(v)} />
+        <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end' }}>
+          <div style={{ flex: 1 }}>
+            <Dropdown label="Sort By" options={SORT_FIELD_OPTIONS} value={sortBy} onChange={(_, v) => setSortBy(v)} />
+          </div>
+          <button
+            type="button"
+            onClick={handleSortDirectionToggle}
+            disabled={!sortBy}
+            title={sortDirection === 'desc' ? 'Descending — click for ascending' : 'Ascending — click for descending'}
+            style={{
+              height: 38, width: 38, flexShrink: 0,
+              border: '1px solid #d5d7d9', borderRadius: 4, background: '#fff',
+              cursor: sortBy ? 'pointer' : 'not-allowed',
+              opacity: sortBy ? 1 : 0.4,
+              fontSize: 15, lineHeight: 1,
+            }}
+          >
+            {sortDirection === 'desc' ? '↓' : '↑'}
+          </button>
+        </div>
       </div>
 
       {error && <div style={{ marginBottom: 12 }}><Alert type="error">{error}</Alert></div>}
       {editLinkError && <div style={{ marginBottom: 12 }}><Alert type="error" onClose={() => setEditLinkError(null)}>{editLinkError}</Alert></div>}
 
-      <div className="mb3" style={{ display: 'flex', flexWrap: 'nowrap', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
-        <button
-          onClick={handleRefresh}
-          disabled={loading}
-          title="Refresh with current filters"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: 32,
-            height: 32,
-            boxSizing: 'border-box',
-            background: '#fff',
-            border: '1px solid #dfe3e8',
-            borderRadius: 4,
-            padding: 0,
-            fontSize: 16,
-            lineHeight: 1,
-            marginRight: 15,
-            cursor: loading ? 'default' : 'pointer',
-            color: '#555',
-            opacity: loading ? 0.6 : 1,
-          }}
-        >
-          ↻
-        </button>
-        {/* Pagination's own internal markup carries a Tachyons "pt5"
-            (padding-top: 4rem = 64px) on its content wrapper — real, not a
-            layout bug on our side (confirmed by inspecting the rendered
-            DOM). That pushes its visible content down inside a much taller
-            box than our 32px button, which just LOOKS like two stacked rows
-            since alignItems:center centers the button against that inflated
-            height. Pulling the whole component up by the same 64px cancels
-            it back out. */}
-        {/* Confirmed live (2026-10-08, via browser inspect) that -64 alone
-            wasn't quite enough — an extra margin-top: 47px on Pagination's
-            own inner ".pt5" row was also needed to land it level with the
-            button. That inner div is rendered by Pagination itself with no
-            prop to style it directly, so the override goes through a scoped
-            <style> tag keyed to this one wrapper's unique class, rather than
-            a global rule that would also hit the second, unrelated
-            Pagination instance below the table. */}
-        <style>{`.seller-products-top-pagination .pt5 { margin-top: 47px; }`}</style>
-        <div className="seller-products-top-pagination" style={{ marginTop: -64 }}>
-          <Pagination
-            currentItemFrom={totalFrom}
-            currentItemTo={totalTo}
-            textOf="of"
-            totalItems={total}
-            onNextClick={handleNextPage}
-            onPrevClick={handlePrevPage}
-          />
+      <div className="mb3" style={{ display: 'flex', flexWrap: 'nowrap', alignItems: 'center', justifyContent: 'space-between', gap: 4 }}>
+        <div>
+          {hasActiveFilters && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span style={{ fontSize: 13, color: '#666' }}>
+                {total} products match your filters
+              </span>
+              <button
+                onClick={handleClearFilters}
+                style={{ background: 'none', border: '1px solid #ccc', borderRadius: 4, padding: '3px 12px', fontSize: 12, cursor: 'pointer', color: '#555' }}
+              >
+                Clear filters
+              </button>
+            </div>
+          )}
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'nowrap', alignItems: 'center', gap: 4 }}>
+          <button
+            onClick={handleRefresh}
+            disabled={loading}
+            title="Refresh with current filters"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 32,
+              height: 32,
+              boxSizing: 'border-box',
+              background: '#fff',
+              border: '1px solid #dfe3e8',
+              borderRadius: 4,
+              padding: 0,
+              fontSize: 16,
+              lineHeight: 1,
+              marginRight: 15,
+              cursor: loading ? 'default' : 'pointer',
+              color: '#555',
+              opacity: loading ? 0.6 : 1,
+            }}
+          >
+            ↻
+          </button>
+          {/* Pagination's own internal markup carries a Tachyons "pt5"
+              (padding-top: 4rem = 64px) on its content wrapper — real, not a
+              layout bug on our side (confirmed by inspecting the rendered
+              DOM). That pushes its visible content down inside a much taller
+              box than our 32px button, which just LOOKS like two stacked rows
+              since alignItems:center centers the button against that inflated
+              height. Pulling the whole component up by the same 64px cancels
+              it back out. */}
+          {/* Confirmed live (2026-10-08, via browser inspect) that -64 alone
+              wasn't quite enough — an extra margin-top: 47px on Pagination's
+              own inner ".pt5" row was also needed to land it level with the
+              button. That inner div is rendered by Pagination itself with no
+              prop to style it directly, so the override goes through a scoped
+              <style> tag keyed to this one wrapper's unique class, rather than
+              a global rule that would also hit the second, unrelated
+              Pagination instance below the table. */}
+          <style>{`.seller-products-top-pagination .pt5 { margin-top: 47px; }`}</style>
+          <div className="seller-products-top-pagination" style={{ marginTop: -64 }}>
+            <Pagination
+              currentItemFrom={totalFrom}
+              currentItemTo={totalTo}
+              textOf="of"
+              totalItems={total}
+              onNextClick={handleNextPage}
+              onPrevClick={handlePrevPage}
+            />
+          </div>
         </div>
       </div>
 

@@ -208,6 +208,8 @@ export async function listSellerProducts(ctx: ServiceContext<Clients>) {
       cas_number: q.cas_number,
       hs_code: q.hs_code,
       vtex_linked: q.vtex_linked,
+      sort_by: q.sort_by,
+      sort_direction: q.sort_direction,
     }))
     ctx.body = { success: true, ...result }
   } catch (err: any) {

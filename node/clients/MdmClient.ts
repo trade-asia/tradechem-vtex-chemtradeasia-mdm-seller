@@ -130,7 +130,9 @@ export class MdmClient extends ExternalClient {
     mdmSellerId: number,
     page = 1,
     perPage = 20,
-    filters?: { status?: string; name?: string; sku?: string; cas_number?: string; hs_code?: string; vtex_linked?: string }
+    // sort_by/sort_direction added by MDM 2026-10-20, at our request — see
+    // the admin app's MdmClient.ts for the full comment on valid values.
+    filters?: { status?: string; name?: string; sku?: string; cas_number?: string; hs_code?: string; vtex_linked?: string; sort_by?: string; sort_direction?: string }
   ): Promise<{ products: any[]; currentPage: number; lastPage: number; total: number }> {
     const params = new URLSearchParams({ per_page: String(perPage), page: String(page), mdm_seller_id: String(mdmSellerId) })
     if (filters) {
