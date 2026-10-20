@@ -878,8 +878,8 @@ const SellerProducts = () => {
         display: 'grid',
         // Fixed 4 per row rather than auto-fit — auto-fit let everything
         // cram into one wide row on a large screen instead of a consistent
-        // grid, especially once Sort By/direction were added on top of the
-        // original 6 filters.
+        // grid. Sort By/direction moved out of this grid and into the
+        // refresh/pagination row instead (2026-10-20).
         gridTemplateColumns: 'repeat(4, 1fr)',
         gap: 12,
         marginBottom: 16,
@@ -890,26 +890,6 @@ const SellerProducts = () => {
         <Input label="HS Code" placeholder="e.g. 3806.10.00" value={hsFilter} onChange={e => setHsFilter(e.target.value)} />
         <Dropdown label="Status" options={STATUS_OPTIONS} value={statusFilter} onChange={(_, v) => setStatusFilter(v)} />
         <Dropdown label="VTEX Link" options={VTEX_LINKED_OPTIONS} value={linkedFilter} onChange={(_, v) => setLinkedFilter(v)} />
-        <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end' }}>
-          <div style={{ flex: 1 }}>
-            <Dropdown label="Sort By" options={SORT_FIELD_OPTIONS} value={sortBy} onChange={(_, v) => setSortBy(v)} />
-          </div>
-          <button
-            type="button"
-            onClick={handleSortDirectionToggle}
-            disabled={!sortBy}
-            title={sortDirection === 'desc' ? 'Descending — click for ascending' : 'Ascending — click for descending'}
-            style={{
-              height: 38, width: 38, flexShrink: 0,
-              border: '1px solid #d5d7d9', borderRadius: 4, background: '#fff',
-              cursor: sortBy ? 'pointer' : 'not-allowed',
-              opacity: sortBy ? 1 : 0.4,
-              fontSize: 15, lineHeight: 1,
-            }}
-          >
-            {sortDirection === 'desc' ? '↓' : '↑'}
-          </button>
-        </div>
       </div>
 
       {error && <div style={{ marginBottom: 12 }}><Alert type="error">{error}</Alert></div>}
@@ -931,7 +911,25 @@ const SellerProducts = () => {
             </div>
           )}
         </div>
-        <div style={{ display: 'flex', flexWrap: 'nowrap', alignItems: 'center', gap: 4 }}>
+        <div style={{ display: 'flex', flexWrap: 'nowrap', alignItems: 'center', gap: 8 }}>
+          <div style={{ width: 170 }}>
+            <Dropdown label="Sort By" options={SORT_FIELD_OPTIONS} value={sortBy} onChange={(_, v) => setSortBy(v)} />
+          </div>
+          <button
+            type="button"
+            onClick={handleSortDirectionToggle}
+            disabled={!sortBy}
+            title={sortDirection === 'desc' ? 'Descending — click for ascending' : 'Ascending — click for descending'}
+            style={{
+              height: 38, width: 38, flexShrink: 0, marginRight: 7,
+              border: '1px solid #d5d7d9', borderRadius: 4, background: '#fff',
+              cursor: sortBy ? 'pointer' : 'not-allowed',
+              opacity: sortBy ? 1 : 0.4,
+              fontSize: 15, lineHeight: 1,
+            }}
+          >
+            {sortDirection === 'desc' ? '↓' : '↑'}
+          </button>
           <button
             onClick={handleRefresh}
             disabled={loading}
