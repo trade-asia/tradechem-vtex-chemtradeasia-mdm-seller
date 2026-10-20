@@ -42,6 +42,10 @@
       "path": "/_v/mdm-seller/products/import",
       "public": true
     },
+    "sellerProductsExport": {
+      "path": "/_v/mdm-seller/products/export",
+      "public": true
+    },
     "sellerProductMediaServe": {
       "path": "/_v/mdm-seller/media",
       "public": true

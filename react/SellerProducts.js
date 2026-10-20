@@ -642,6 +642,8 @@ const SellerProducts = () => {
   const [mediaProduct, setMediaProduct] = useState(null)
   const [documentsProduct, setDocumentsProduct] = useState(null)
   const [showImport, setShowImport] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState(null)
   const [rejectionProduct, setRejectionProduct] = useState(null)
   const [confirmUnpublishProduct, setConfirmUnpublishProduct] = useState(null)
   const [unpublishingId, setUnpublishingId] = useState(null)
@@ -682,25 +684,36 @@ const SellerProducts = () => {
       .catch(() => {})
   }, [])
 
+  // Shared by doFetch and the Export button below — both need the table's
+  // current filter state turned into the exact same query params, and
+  // letting them drift apart would mean "export what's filtered" quietly
+  // stops being true.
+  const buildFilterParams = useCallback(() => {
+    const params = new URLSearchParams()
+    if (nameFilter) params.set('name', nameFilter)
+    if (skuFilter) params.set('sku', skuFilter)
+    if (casFilter) params.set('cas_number', casFilter)
+    if (hsFilter) params.set('hs_code', hsFilter)
+    // MDM treats an omitted status as active-only, not "all statuses" —
+    // "All Statuses" here has to send the explicit status=all value to
+    // actually mean that (confirmed live 2026-09-11).
+    params.set('status', statusFilter || 'all')
+    if (linkedFilter) params.set('vtex_linked', linkedFilter)
+    if (sortBy) {
+      params.set('sort_by', sortBy)
+      params.set('sort_direction', sortDirection || 'asc')
+    }
+    return params
+  }, [nameFilter, skuFilter, casFilter, hsFilter, statusFilter, linkedFilter, sortBy, sortDirection])
+
   const doFetch = useCallback(async () => {
     const p = fetchParamsRef.current.page
     setLoading(true)
     setError(null)
     try {
-      const params = new URLSearchParams({ page: String(p), per_page: String(PER_PAGE) })
-      if (nameFilter) params.set('name', nameFilter)
-      if (skuFilter) params.set('sku', skuFilter)
-      if (casFilter) params.set('cas_number', casFilter)
-      if (hsFilter) params.set('hs_code', hsFilter)
-      // MDM treats an omitted status as active-only, not "all statuses" —
-      // "All Statuses" here has to send the explicit status=all value to
-      // actually mean that (confirmed live 2026-09-11).
-      params.set('status', statusFilter || 'all')
-      if (linkedFilter) params.set('vtex_linked', linkedFilter)
-      if (sortBy) {
-        params.set('sort_by', sortBy)
-        params.set('sort_direction', sortDirection || 'asc')
-      }
+      const params = buildFilterParams()
+      params.set('page', String(p))
+      params.set('per_page', String(PER_PAGE))
 
       const res = await fetch(`${BASE}/products-list?${params.toString()}`)
       const data = await parseResponse(res)
@@ -842,6 +855,37 @@ const SellerProducts = () => {
     }
   }
 
+  // Exports whatever currently matches the table's filters (not just the
+  // current page) — same columns+rows shape the backend returns, turned
+  // into a CSV client-side with this file's own serializeCsv (already used
+  // for the Skip-active-SKUs reupload path) and handed to the browser as a
+  // download via a throwaway Blob URL.
+  const handleExportClick = async () => {
+    setExporting(true)
+    setExportError(null)
+    try {
+      const params = buildFilterParams()
+      const res = await fetch(`${BASE}/products/export?${params.toString()}`)
+      const data = await parseResponse(res)
+      if (!data.success) throw new Error(data.detail ? `${data.error}: ${data.detail}` : data.error)
+
+      const csv = serializeCsv([data.columns, ...data.rows])
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `my-products-export-${new Date().toISOString().slice(0, 10)}.csv`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      setExportError(err.message)
+    } finally {
+      setExporting(false)
+    }
+  }
+
   const totalFrom = total === 0 ? 0 : (page - 1) * PER_PAGE + 1
   const totalTo = Math.min(page * PER_PAGE, total)
 
@@ -853,6 +897,9 @@ const SellerProducts = () => {
           <div style={{ fontSize: 14, color: '#666', marginBottom: 24 }}>Your products, synced with MDM.</div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
+          <Button variation="secondary" onClick={handleExportClick} isLoading={exporting}>
+            + Export products
+          </Button>
           <Button variation="secondary" onClick={() => setShowImport(true)}>+ Import products</Button>
           <Button variation="primary" onClick={handleAddClick} isLoading={addLoading}>
             + Add product
@@ -860,6 +907,7 @@ const SellerProducts = () => {
         </div>
       </div>
       {addLinkError && <div style={{ marginTop: 12 }}><Alert type="error" onClose={() => setAddLinkError(null)}>{addLinkError}</Alert></div>}
+      {exportError && <div style={{ marginTop: 12 }}><Alert type="error" onClose={() => setExportError(null)}>{exportError}</Alert></div>}
 
       {sellerInfo && (
         <div style={{

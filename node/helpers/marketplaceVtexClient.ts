@@ -26,6 +26,159 @@ function baseUrl(): string {
   return `https://${MARKETPLACE_ACCOUNT}.vtexcommercestable.com.br`
 }
 
+// Pricing lives on a different host entirely (api.vtex.com, scoped by
+// account name in the path) — same split the marketplace app's own
+// VtexPricingClient.ts documents, confirmed against VTEX's docs.
+function pricingBaseUrl(): string {
+  return `https://api.vtex.com/${MARKETPLACE_ACCOUNT}`
+}
+
+// Export columns (2026-10-20, at the seller's request) — the exact same
+// VTEX-side fields the marketplace admin's Import/Link-to-SKU tabs already
+// show (see the marketplace app's getImportExistingDetails), fetched here
+// read-only via the same cross-account mechanism as the two functions
+// above. SKU id comes from MDM's own vtex_sku_id when it has one; falls
+// back to "first SKU of this product" otherwise (MDM's read side doesn't
+// echo vtex_sku_id back yet for every row — see SellerProducts.js's own
+// comment on that gap).
+export async function getMarketplaceSkusByProductId(
+  vtexAppKey: string,
+  vtexAppToken: string,
+  vtexProductId: string
+): Promise<any[]> {
+  try {
+    const res = await axios.get(
+      `${baseUrl()}/api/catalog_system/pvt/sku/stockkeepingunitByProductId/${vtexProductId}`,
+      { headers: authHeaders(vtexAppKey, vtexAppToken), timeout: 15000 }
+    )
+    return Array.isArray(res.data) ? res.data : []
+  } catch {
+    return []
+  }
+}
+
+export async function getMarketplaceProduct(
+  vtexAppKey: string,
+  vtexAppToken: string,
+  vtexProductId: string
+): Promise<any | null> {
+  try {
+    const res = await axios.get(`${baseUrl()}/api/catalog/pvt/product/${vtexProductId}`, {
+      headers: authHeaders(vtexAppKey, vtexAppToken),
+      timeout: 15000,
+    })
+    return res.data
+  } catch {
+    return null
+  }
+}
+
+export async function getMarketplaceSku(
+  vtexAppKey: string,
+  vtexAppToken: string,
+  vtexSkuId: number
+): Promise<any | null> {
+  try {
+    const res = await axios.get(`${baseUrl()}/api/catalog/pvt/stockkeepingunit/${vtexSkuId}`, {
+      headers: authHeaders(vtexAppKey, vtexAppToken),
+      timeout: 15000,
+    })
+    return res.data
+  } catch {
+    return null
+  }
+}
+
+export async function getMarketplacePrice(
+  vtexAppKey: string,
+  vtexAppToken: string,
+  vtexSkuId: number
+): Promise<any | null> {
+  try {
+    const res = await axios.get(`${pricingBaseUrl()}/pricing/prices/${vtexSkuId}`, {
+      headers: authHeaders(vtexAppKey, vtexAppToken),
+      timeout: 15000,
+    })
+    return res.data
+  } catch {
+    return null
+  }
+}
+
+export async function getMarketplaceInventory(
+  vtexAppKey: string,
+  vtexAppToken: string,
+  vtexSkuId: number
+): Promise<any[]> {
+  try {
+    const res = await axios.get(`${baseUrl()}/api/logistics/pvt/inventory/skus/${vtexSkuId}`, {
+      headers: authHeaders(vtexAppKey, vtexAppToken),
+      timeout: 15000,
+    })
+    return Array.isArray(res.data?.balance) ? res.data.balance : []
+  } catch {
+    return []
+  }
+}
+
+// Name-resolution maps, fetched once per export run rather than per row —
+// Category/Brand/Warehouse are IDs on the product/SKU/inventory records
+// above, and a CSV is far more useful to a human with the actual names.
+export async function getMarketplaceCategoryMap(
+  vtexAppKey: string,
+  vtexAppToken: string
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>()
+  try {
+    const res = await axios.get(`${baseUrl()}/api/catalog_system/pub/category/tree/10`, {
+      headers: authHeaders(vtexAppKey, vtexAppToken),
+      timeout: 15000,
+    })
+    const walk = (nodes: any[]) => {
+      for (const node of nodes ?? []) {
+        if (node?.id != null) map.set(String(node.id), node.name)
+        if (Array.isArray(node?.children)) walk(node.children)
+      }
+    }
+    walk(res.data)
+  } catch {}
+  return map
+}
+
+export async function getMarketplaceBrandMap(
+  vtexAppKey: string,
+  vtexAppToken: string
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>()
+  try {
+    const res = await axios.get(`${baseUrl()}/api/catalog_system/pvt/brand/list`, {
+      headers: authHeaders(vtexAppKey, vtexAppToken),
+      timeout: 15000,
+    })
+    for (const b of res.data ?? []) {
+      if (b?.id != null) map.set(String(b.id), b.name)
+    }
+  } catch {}
+  return map
+}
+
+export async function getMarketplaceWarehouseMap(
+  vtexAppKey: string,
+  vtexAppToken: string
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>()
+  try {
+    const res = await axios.get(`${baseUrl()}/api/logistics/pvt/configuration/warehouses`, {
+      headers: authHeaders(vtexAppKey, vtexAppToken),
+      timeout: 15000,
+    })
+    for (const w of res.data ?? []) {
+      if (w?.id != null) map.set(String(w.id), w.name)
+    }
+  } catch {}
+  return map
+}
+
 export async function getMarketplaceVtexProductStatus(
   vtexAppKey: string,
   vtexAppToken: string,

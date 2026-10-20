@@ -4,7 +4,18 @@ import { Clients } from '../clients'
 import { getMdmToken, clearMdmToken } from '../helpers/getMdmToken'
 import { ensureSellerSynced } from '../helpers/sellerSync'
 import { readMdmConfig, forceRefreshMdmConfig } from './devSettingsHandler'
-import { deactivateMarketplaceVtexProduct, getMarketplaceVtexProductStatus } from '../helpers/marketplaceVtexClient'
+import {
+  deactivateMarketplaceVtexProduct,
+  getMarketplaceVtexProductStatus,
+  getMarketplaceProduct,
+  getMarketplaceSku,
+  getMarketplaceSkusByProductId,
+  getMarketplacePrice,
+  getMarketplaceInventory,
+  getMarketplaceCategoryMap,
+  getMarketplaceBrandMap,
+  getMarketplaceWarehouseMap,
+} from '../helpers/marketplaceVtexClient'
 
 async function readSettings(ctx: ServiceContext<Clients>): Promise<any | null> {
   const settings = await readMdmConfig(ctx)
@@ -215,6 +226,143 @@ export async function listSellerProducts(ctx: ServiceContext<Clients>) {
   } catch (err: any) {
     ctx.body = { success: false, error: 'Failed to load products', detail: mdmErrDetail(err) }
   }
+}
+
+// Export's extra columns, beyond the base MDM fields every row already has
+// — the exact same VTEX-side fields the marketplace admin's Import/Link-to-
+// SKU tabs show (see the marketplace app's getImportExistingDetails),
+// fetched read-only here via marketplaceVtexClient's cross-account calls.
+// Kept out of the bulk CSV *import* on purpose (2026-10-20, per explicit
+// instruction) — these are read-only VTEX enrichment for a report, not
+// fields MDM's import schema accepts.
+const EXPORT_ENRICHMENT_COLUMNS = [
+  'Category', 'Brand', 'Manufacturer Code', 'Modal Type',
+  'Package Weight', 'Package Height', 'Package Length', 'Package Width',
+  'Actual Weight', 'Actual Height', 'Actual Length', 'Actual Width',
+  'Warehouse', 'Quantity', 'Price', 'List Price',
+]
+const EXPORT_COLUMNS = [
+  'Name', 'SKU', 'CAS Number', 'HS Code', 'Origin', 'Status',
+  'Tradechem PID', 'Tradechem SID',
+  ...EXPORT_ENRICHMENT_COLUMNS,
+]
+function blankEnrichment(): string[] {
+  return new Array(EXPORT_ENRICHMENT_COLUMNS.length).fill('')
+}
+
+// GET /_v/mdm-seller/products/export — same filters as the Products list
+// (whatever's currently applied in the table), but every matching row
+// across every page, enriched with live VTEX catalog/pricing/inventory
+// data for linked products. Returns columns+rows rather than a CSV string
+// directly — the frontend already has its own serializeCsv (used for the
+// Skip-active-SKUs reupload path) and triggers the actual file download
+// client-side via a Blob, so there's no need to deal with Content-
+// Disposition/streaming here.
+export async function exportSellerProducts(ctx: ServiceContext<Clients>) {
+  ctx.status = 200
+  const auth = await mdmAuth(ctx)
+  if (!auth) return
+
+  const q = ctx.query as Record<string, string>
+  const filters = {
+    status: q.status, name: q.name, sku: q.sku, cas_number: q.cas_number,
+    hs_code: q.hs_code, vtex_linked: q.vtex_linked, sort_by: q.sort_by, sort_direction: q.sort_direction,
+  }
+
+  const EXPORT_PAGE_SIZE = 100
+  const allProducts: any[] = []
+  try {
+    let page = 1
+    let lastPage = 1
+    do {
+      const result = await withAuthRetry(ctx, auth, a => ctx.clients.mdm.getSellerProducts(a.token, a.mdmSellerId, page, EXPORT_PAGE_SIZE, filters))
+      allProducts.push(...result.products)
+      lastPage = result.lastPage || 1
+      page++
+    } while (page <= lastPage)
+  } catch (err: any) {
+    ctx.body = { success: false, error: 'Failed to load products for export', detail: mdmErrDetail(err) }
+    return
+  }
+
+  const settings = await readMdmConfig(ctx)
+  const { vtexAppKey, vtexAppToken } = settings
+  const canEnrich = !!(vtexAppKey && vtexAppToken)
+
+  let categoryMap = new Map<string, string>()
+  let brandMap = new Map<string, string>()
+  let warehouseMap = new Map<string, string>()
+  if (canEnrich) {
+    [categoryMap, brandMap, warehouseMap] = await Promise.all([
+      getMarketplaceCategoryMap(vtexAppKey, vtexAppToken),
+      getMarketplaceBrandMap(vtexAppKey, vtexAppToken),
+      getMarketplaceWarehouseMap(vtexAppKey, vtexAppToken),
+    ])
+  }
+
+  const rows: string[][] = []
+  for (const p of allProducts) {
+    const origin = Array.isArray(p.origin_countries) && p.origin_countries.length
+      ? p.origin_countries.map((c: any) => c.name).join(', ')
+      : ''
+    const base = [
+      p.name ?? '', p.sku ?? '', p.cas_number ?? '', p.hs_code ?? '', origin, p.status ?? '',
+      p.vtex?.vtex_product_id != null ? String(p.vtex.vtex_product_id) : '',
+      p.vtex?.vtex_sku_id != null ? String(p.vtex.vtex_sku_id) : '',
+    ]
+
+    const vtexProductId: string | undefined = p.vtex?.vtex_product_id != null ? String(p.vtex.vtex_product_id) : undefined
+    if (!canEnrich || !p.vtex?.linked || !vtexProductId) {
+      rows.push([...base, ...blankEnrichment()])
+      continue
+    }
+
+    const product = await getMarketplaceProduct(vtexAppKey, vtexAppToken, vtexProductId)
+    const categoryName = product?.CategoryId != null ? (categoryMap.get(String(product.CategoryId)) ?? String(product.CategoryId)) : ''
+    const brandName = product?.BrandId != null ? (brandMap.get(String(product.BrandId)) ?? String(product.BrandId)) : ''
+
+    let skuId: number | null = p.vtex?.vtex_sku_id ? Number(p.vtex.vtex_sku_id) : null
+    if (!skuId) {
+      const skus = await getMarketplaceSkusByProductId(vtexAppKey, vtexAppToken, vtexProductId)
+      skuId = skus?.[0]?.Id ?? null
+    }
+    if (!skuId) {
+      const enrichment = blankEnrichment()
+      enrichment[0] = categoryName
+      enrichment[1] = brandName
+      rows.push([...base, ...enrichment])
+      continue
+    }
+
+    const [sku, price, inventory] = await Promise.all([
+      getMarketplaceSku(vtexAppKey, vtexAppToken, skuId),
+      getMarketplacePrice(vtexAppKey, vtexAppToken, skuId),
+      getMarketplaceInventory(vtexAppKey, vtexAppToken, skuId),
+    ])
+    const stockEntry = inventory.find((b: any) => (b?.totalQuantity ?? 0) > 0 || b?.hasUnlimitedQuantity) ?? inventory[0]
+
+    rows.push([
+      ...base,
+      categoryName,
+      brandName,
+      sku?.ManufacturerCode ?? '',
+      sku?.ModalType ?? '',
+      sku?.PackagedWeightKg != null ? String(sku.PackagedWeightKg) : '',
+      sku?.PackagedHeight != null ? String(sku.PackagedHeight) : '',
+      sku?.PackagedLength != null ? String(sku.PackagedLength) : '',
+      sku?.PackagedWidth != null ? String(sku.PackagedWidth) : '',
+      sku?.WeightKg != null ? String(sku.WeightKg) : '',
+      sku?.Height != null ? String(sku.Height) : '',
+      sku?.Length != null ? String(sku.Length) : '',
+      sku?.Width != null ? String(sku.Width) : '',
+      stockEntry?.warehouseId ? (warehouseMap.get(String(stockEntry.warehouseId)) ?? String(stockEntry.warehouseId)) : '',
+      stockEntry?.hasUnlimitedQuantity ? 'Unlimited' : (stockEntry?.totalQuantity != null ? String(stockEntry.totalQuantity) : ''),
+      price?.basePrice ?? price?.costPrice ?? '',
+      price?.listPrice ?? '',
+    ])
+  }
+
+  ctx.body = { success: true, columns: EXPORT_COLUMNS, rows, total: rows.length }
 }
 
 // POST /_v/mdm-seller/products/unpublish?mdmProductId=... — flips an Active
