@@ -911,17 +911,32 @@ const SellerProducts = () => {
             </div>
           )}
         </div>
-        <div style={{ display: 'flex', flexWrap: 'nowrap', alignItems: 'center', gap: 8 }}>
-          <div style={{ width: 170 }}>
-            <Dropdown label="Sort By" options={SORT_FIELD_OPTIONS} value={sortBy} onChange={(_, v) => setSortBy(v)} />
-          </div>
+        <div style={{ display: 'flex', flexWrap: 'nowrap', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 12, color: '#888', flexShrink: 0 }}>Sort:</span>
+          {/* Plain native <select>, not vtex.styleguide's Dropdown — that
+              component always renders its own label above the input,
+              which can't be made to match a plain 32px button's height.
+              Sized to exactly match the refresh button next to it. */}
+          <select
+            value={sortBy}
+            onChange={e => setSortBy(e.target.value)}
+            style={{
+              height: 32, boxSizing: 'border-box', padding: '0 8px',
+              border: '1px solid #d5d7d9', borderRadius: 4, background: '#fff',
+              fontSize: 13, color: '#142032', cursor: 'pointer',
+            }}
+          >
+            {SORT_FIELD_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
           <button
             type="button"
             onClick={handleSortDirectionToggle}
             disabled={!sortBy}
             title={sortDirection === 'desc' ? 'Descending — click for ascending' : 'Ascending — click for descending'}
             style={{
-              height: 38, width: 38, flexShrink: 0, marginRight: 7,
+              height: 32, width: 32, flexShrink: 0, marginRight: 9,
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              boxSizing: 'border-box', padding: 0,
               border: '1px solid #d5d7d9', borderRadius: 4, background: '#fff',
               cursor: sortBy ? 'pointer' : 'not-allowed',
               opacity: sortBy ? 1 : 0.4,
