@@ -876,11 +876,11 @@ const SellerProducts = () => {
 
       <div style={{
         display: 'grid',
-        // Fixed 4 per row rather than auto-fit — auto-fit let everything
+        // Fixed 3 per row rather than auto-fit — auto-fit let everything
         // cram into one wide row on a large screen instead of a consistent
         // grid. Sort By/direction moved out of this grid and into the
         // refresh/pagination row instead (2026-10-20).
-        gridTemplateColumns: 'repeat(4, 1fr)',
+        gridTemplateColumns: 'repeat(3, 1fr)',
         gap: 12,
         marginBottom: 16,
       }}>
