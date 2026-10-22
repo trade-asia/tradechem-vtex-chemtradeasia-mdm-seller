@@ -1275,10 +1275,21 @@ const SellerProducts = () => {
                   )}
                   <button
                     onClick={() => setPriceInventoryProduct(p)}
-                    title="Manage this product's price and inventory. Other fields are only editable until your product is approved — after approval, you won't be able to change them."
+                    title={
+                      p.inSellerCatalog
+                        ? "This product already exists in your own catalog — manage its price and inventory here."
+                        : "Manage this product's price and inventory. Other fields are only editable until your product is approved — after approval, you won't be able to change them."
+                    }
                     style={{
-                      background: '#fff', border: '1px solid #16a34a', borderRadius: 4, padding: '3px 10px',
-                      fontSize: 11, fontWeight: 600, color: '#16a34a', cursor: 'pointer',
+                      // Inverted/filled once the product already exists in
+                      // the seller's own catalog (2026-10-23) — a slightly
+                      // darker green than the usual accent so white text
+                      // stays readable on top of it.
+                      background: p.inSellerCatalog ? '#15803d' : '#fff',
+                      border: '1px solid #15803d', borderRadius: 4, padding: '3px 10px',
+                      fontSize: 11, fontWeight: 600,
+                      color: p.inSellerCatalog ? '#fff' : '#15803d',
+                      cursor: 'pointer',
                     }}
                   >
                     Price &amp; Inventory

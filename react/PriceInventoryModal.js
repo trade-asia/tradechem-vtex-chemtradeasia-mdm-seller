@@ -235,10 +235,18 @@ const PriceInventoryModal = ({ product, onClose }) => {
         ) : (
           <>
             {wasLinkedOnLoad && (
-              <div style={{ marginBottom: 16 }}>
-                <Alert type="success">
-                  This product already exists in your marketplace catalog (Product ID {sellerPid}, SKU ID {sellerSid}). Only price and inventory can be changed here now.
-                </Alert>
+              // Custom blue, not the usual green Alert — this is just
+              // informational status, not a "success"/confirmation moment,
+              // and deliberately says "your catalog" rather than
+              // "marketplace" so it can't be misread as "this is published
+              // and live" (those are two separate, unrelated things — see
+              // this file's own note on why).
+              <div style={{
+                marginBottom: 16, fontSize: 13, color: '#1e40af',
+                background: '#eff6ff', border: '1px solid #bfdbfe',
+                borderRadius: 6, padding: '10px 14px',
+              }}>
+                This product is already in your catalog (Product ID {sellerPid}, SKU ID {sellerSid}). Once a product is created, you can only change its price and inventory here.
               </div>
             )}
             {saved && (
@@ -246,7 +254,7 @@ const PriceInventoryModal = ({ product, onClose }) => {
                 <Alert type="success" onClose={() => setSaved(false)}>
                   {wasLinkedOnLoad
                     ? 'Saved successfully.'
-                    : `Product created in your marketplace catalog (Product ID ${sellerPid}, SKU ID ${sellerSid}). From now on, only price and inventory can be changed here.`}
+                    : `Product added to your catalog (Product ID ${sellerPid}, SKU ID ${sellerSid}). Once a product is created, you can only change its price and inventory here.`}
                 </Alert>
               </div>
             )}

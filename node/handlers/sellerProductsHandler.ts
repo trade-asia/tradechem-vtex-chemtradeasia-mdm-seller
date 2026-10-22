@@ -238,10 +238,25 @@ export async function listSellerProducts(ctx: ServiceContext<Clients>) {
       sort_by: q.sort_by,
       sort_direction: q.sort_direction,
     }))
-    // List loads immediately with just the cheap `linked` flag — live
-    // Active/Inactive status (what "Published" actually reflects, see
-    // getVtexProductStatusHandler) is fetched per row afterward, from the
-    // frontend, so the list itself is never blocked waiting on VTEX.
+
+    // Whether each product already exists in the SELLER's OWN catalog (via
+    // Price & Inventory — sellerPid in MDM metadata) — entirely separate
+    // from marketplace-link/Published status (that one's deliberately left
+    // to a slower per-row live VTEX check, done progressively from the
+    // frontend; this one is just a cheap MDM metadata read, so there's no
+    // reason to pay for a second round trip per row — it's folded in here
+    // instead, in parallel, same enrichment pattern as Export's columns).
+    const products = Array.isArray(result?.products) ? result.products : []
+    await Promise.all(products.map(async (p: any) => {
+      if (!p?.id) return
+      try {
+        const metadata = await withAuthRetry(ctx, auth, a => ctx.clients.mdm.getProductMetadata(a.token, p.id))
+        p.inSellerCatalog = !!metadata?.vtexPriceInventory?.sellerPid
+      } catch {
+        p.inSellerCatalog = false
+      }
+    }))
+
     ctx.body = { success: true, ...result }
   } catch (err: any) {
     ctx.body = { success: false, error: 'Failed to load products', detail: mdmErrDetail(err) }

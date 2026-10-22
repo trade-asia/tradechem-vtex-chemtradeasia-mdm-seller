@@ -246,7 +246,17 @@ export class MdmClient extends ExternalClient {
         this.url(`/vtex/mdm-products/${mdmProductId}/metadata`),
         { headers: { Authorization: `Bearer ${token}` } }
       )
-      return res?.data?.data ?? res?.data ?? null
+      // Confirmed envelope shape (MDM, 2026-10-23): res.data is
+      // { data, synced_at, mdm_product_id } — our own stored object is at
+      // res.data.data specifically, nowhere else. Deliberately NOT a `??`
+      // fallback chain across two guessed depths: when nothing's been
+      // pushed yet, res.data.data is an EXPLICIT null (not a missing key),
+      // and `res.data.data ?? res.data` was incorrectly falling through to
+      // the whole envelope in that case — which then got spread into the
+      // next save's POST body wholesale. Exactly the malformed payload MDM
+      // caught in a test request (data/synced_at/mdm_product_id echoed
+      // back alongside the real fields instead of only the real fields).
+      return res?.data?.data ?? null
     } catch (err: any) {
       if (err?.response?.status === 404) return null
       throw err
