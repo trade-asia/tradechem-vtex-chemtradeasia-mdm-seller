@@ -594,8 +594,12 @@ export async function saveSellerPriceInventory(ctx: ServiceContext<Clients>) {
     try {
       const created = await ctx.clients.sellerCatalog.createProduct({
         Name: name,
-        BrandId: Number(brandId),
-        CategoryId: Number(categoryId),
+        // Confirmed live 2026-10-22: VTEX rejects these as numbers —
+        // "$.BrandId: The JSON value could not be converted to
+        // System.String" (HTTP 400, ModelStateInvalidException). Both IDs
+        // have to be sent as strings here, unlike the classic Catalog API.
+        BrandId: String(brandId),
+        CategoryId: String(categoryId),
         RefId: refId || undefined,
         TaxCode: taxCode || undefined,
         Ean: ean || undefined,

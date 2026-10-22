@@ -54,7 +54,7 @@ const STATUS_COLORS = {
 // already live there) — Actions stays inline below it, not a dropdown menu:
 // only 2-3 actions per row here, so a menu would just add a click without
 // the space savings that's worth it on the admin table's longer list.
-const COLS = '1fr 150px 90px 140px'
+const COLS = '1fr 150px 150px 150px'
 
 // Small rounded "!" badge — click to reveal its tooltip (not hover, so it
 // works the same on touch devices), click again or click anywhere else to
@@ -92,6 +92,11 @@ const InfoDot = ({ tooltip }) => {
             background: '#142032', color: '#fff', fontSize: 11, lineHeight: 1.4,
             padding: '6px 10px', borderRadius: 4, width: 220, textAlign: 'left',
             boxShadow: '0 2px 10px rgba(0,0,0,0.25)', zIndex: 30,
+            // Table headers set textTransform/fontWeight/letterSpacing on
+            // themselves, which this popup otherwise inherits since it's
+            // rendered as their descendant — reset explicitly so the
+            // tooltip text stays plain regardless of where the icon sits.
+            textTransform: 'none', fontWeight: 400, letterSpacing: 'normal',
           }}
         >
           {tooltip}
@@ -1108,7 +1113,7 @@ const SellerProducts = () => {
             MDM Status
             <InfoDot tooltip="MDM's own internal workflow status for this product." />
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
             Published
             <InfoDot tooltip="Whether this product is published and live on the marketplace in VTEX." />
           </div>
@@ -1212,19 +1217,16 @@ const SellerProducts = () => {
                     </button>
                   )}
                   {p.status === 'active' && (
-                    <>
-                      <button
-                        onClick={() => handleRevertClick(p)}
-                        title="Revert to Pending Approval"
-                        style={{
-                          background: '#fff', border: '1px solid #b45309', borderRadius: 4, padding: '3px 10px',
-                          fontSize: 11, fontWeight: 600, color: '#b45309', cursor: 'pointer',
-                        }}
-                      >
-                        Revert to Pending
-                      </button>
-                      <InfoDot tooltip="Internal product status." />
-                    </>
+                    <button
+                      onClick={() => handleRevertClick(p)}
+                      title="Revert to Pending Approval"
+                      style={{
+                        background: '#fff', border: '1px solid #b45309', borderRadius: 4, padding: '3px 10px',
+                        fontSize: 11, fontWeight: 600, color: '#b45309', cursor: 'pointer',
+                      }}
+                    >
+                      Revert to Pending
+                    </button>
                   )}
                 </div>
               </div>
@@ -1248,24 +1250,20 @@ const SellerProducts = () => {
                   </button>
                 )}
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingTop: 2 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', paddingTop: 2 }}>
                 <Tag bgColor={p.vtex?.linked ? '#8BC34A' : '#9E9E9E'} color="#fff">
-                  {p.vtex?.linked ? 'published' : 'not published'}
+                  {p.vtex?.linked ? 'published' : 'pending'}
                 </Tag>
-                <InfoDot tooltip={p.vtex?.linked ? 'Published on marketplace.' : 'Not published on marketplace.'} />
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#666', paddingTop: 2, fontFamily: 'monospace' }}>
-                <span>
-                  {p.vtex?.linked
-                    // SID shows "-" until MDM's own GET /vtex/products starts
-                    // returning vtex_sku_id on read (their write side already
-                    // accepts it as of 2026-10-15, read side doesn't echo it
-                    // back yet) — this will pick it up automatically the
-                    // moment that's live, no further change needed here.
-                    ? `${p.vtex.vtex_product_id} / ${p.vtex.vtex_sku_id ?? '-'}`
-                    : <span style={{ fontFamily: 'inherit' }}>Not Linked</span>}
-                </span>
-                <InfoDot tooltip="Once your product is published, the marketplace gives it a new Product ID (PID) and SKU ID (SID) of its own." />
+              <div style={{ fontSize: 12, color: '#666', paddingTop: 2, fontFamily: 'monospace' }}>
+                {p.vtex?.linked
+                  // SID shows "-" until MDM's own GET /vtex/products starts
+                  // returning vtex_sku_id on read (their write side already
+                  // accepts it as of 2026-10-15, read side doesn't echo it
+                  // back yet) — this will pick it up automatically the
+                  // moment that's live, no further change needed here.
+                  ? `${p.vtex.vtex_product_id} / ${p.vtex.vtex_sku_id ?? '-'}`
+                  : <span style={{ fontFamily: 'inherit' }}>Not Linked</span>}
               </div>
             </div>
             )
