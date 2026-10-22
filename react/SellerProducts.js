@@ -899,9 +899,11 @@ const SellerProducts = () => {
           <div style={{ fontSize: 14, color: '#666', marginBottom: 24 }}>Your products, synced with MDM.</div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <Button variation="secondary" onClick={handleExportClick} isLoading={exporting}>
-            + Export products
-          </Button>
+          <span title="Currently not stable — moved to phase 2">
+            <Button variation="secondary" onClick={handleExportClick} isLoading={exporting} disabled>
+              + Export products
+            </Button>
+          </span>
           <Button variation="secondary" onClick={() => setShowImport(true)}>+ Import products</Button>
           <Button variation="primary" onClick={handleAddClick} isLoading={addLoading}>
             + Add product
