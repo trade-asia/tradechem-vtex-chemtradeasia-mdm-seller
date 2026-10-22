@@ -173,7 +173,7 @@ const PriceInventoryModal = ({ product, onClose }) => {
             {linked && (
               <div style={{ marginBottom: 16 }}>
                 <Alert type="success">
-                  This product already exists in your VTEX catalog (Product ID {sellerPid}, SKU ID {sellerSid}). Only price and inventory can be changed here now.
+                  This product already exists in your marketplace catalog (Product ID {sellerPid}, SKU ID {sellerSid}). Only price and inventory can be changed here now.
                 </Alert>
               </div>
             )}
@@ -220,7 +220,7 @@ const PriceInventoryModal = ({ product, onClose }) => {
                 />
                 {brandsDebug && (
                   <div style={{ fontSize: 11, color: '#92400e', background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 4, padding: '6px 10px', wordBreak: 'break-word' }}>
-                    No brands found in your VTEX account, but VTEX returned data we couldn't parse — raw response: {brandsDebug}
+                    No brands found in your marketplace account, but the marketplace returned data we couldn't parse — raw response: {brandsDebug}
                   </div>
                 )}
                 <Dropdown
@@ -232,7 +232,7 @@ const PriceInventoryModal = ({ product, onClose }) => {
                 />
                 {categoriesDebug && (
                   <div style={{ fontSize: 11, color: '#92400e', background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 4, padding: '6px 10px', wordBreak: 'break-word' }}>
-                    No categories found in your VTEX account, but VTEX returned data we couldn't parse — raw response: {categoriesDebug}
+                    No categories found in your marketplace account, but the marketplace returned data we couldn't parse — raw response: {categoriesDebug}
                   </div>
                 )}
                 <Input label="Reference code" value={product.sku} disabled />

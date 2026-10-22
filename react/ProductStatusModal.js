@@ -25,7 +25,7 @@ const ProductStatusModal = ({ product, loading, error, vtexStatus, onClose }) =>
         </div>
         <div>
           <div style={{ fontSize: 11, fontWeight: 700, color: '#6b7c93', textTransform: 'uppercase', marginBottom: 6 }}>
-            VTEX status
+            Marketplace status
           </div>
           {loading ? (
             <Spinner size={24} />
@@ -44,14 +44,14 @@ const ProductStatusModal = ({ product, loading, error, vtexStatus, onClose }) =>
       {!loading && !error && product?.vtex?.vtex_product_id && product?.status === 'active' && !vtexStatus?.isActive && (
         <div style={{ marginBottom: 12 }}>
           <Alert type="warning">
-            MDM shows this product as Active, but the linked VTEX product is Inactive — it will not appear on the storefront despite MDM's status.
+            MDM shows this product as Active, but the linked marketplace product is Inactive — it will not appear on the storefront despite MDM's status.
           </Alert>
         </div>
       )}
       {!loading && !error && product?.vtex?.vtex_product_id && product?.status !== 'active' && vtexStatus?.isActive && (
         <div style={{ marginBottom: 12 }}>
           <Alert type="warning">
-            MDM shows this product as {product?.status}, but the linked VTEX product is still Active — it may still be visible on the storefront.
+            MDM shows this product as {product?.status}, but the linked marketplace product is still Active — it may still be visible on the storefront.
           </Alert>
         </div>
       )}

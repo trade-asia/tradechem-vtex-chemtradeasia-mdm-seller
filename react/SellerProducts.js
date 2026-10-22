@@ -26,7 +26,7 @@ const STATUS_OPTIONS = [
 
 const VTEX_LINKED_OPTIONS = [
   { value: '', label: 'All Products' },
-  { value: '1', label: 'Linked to VTEX' },
+  { value: '1', label: 'Linked to Marketplace' },
   { value: '0', label: 'Not Linked' },
 ]
 
@@ -551,7 +551,7 @@ const ImportModal = ({ onClose, onImported }) => {
                   </div>
                   <div style={{ marginBottom: 8 }}>
                     Updating {activeFlagged.length > 1 ? 'them' : 'it'} will revert the status back to Pending
-                    Approval in both MDM and VTEX, and the product will be delisted from VTEX until it's re-approved.
+                    Approval in both MDM and the marketplace, and the product will be delisted from the marketplace until it's re-approved.
                   </div>
                   <div style={{ maxHeight: 120, overflowY: 'auto' }}>
                     {activeFlagged.map(s => (
@@ -567,7 +567,7 @@ const ImportModal = ({ onClose, onImported }) => {
                   </div>
                   <div style={{ marginBottom: 8 }}>
                     Updating {rejectedFlagged.length > 1 ? 'them' : 'it'} will resubmit for re-review, resetting the
-                    status back to Pending Approval — this wasn't live on VTEX before, so nothing will be delisted.
+                    status back to Pending Approval — this wasn't live on the marketplace before, so nothing will be delisted.
                   </div>
                   <div style={{ maxHeight: 120, overflowY: 'auto' }}>
                     {rejectedFlagged.map(s => (
@@ -864,7 +864,7 @@ const SellerProducts = () => {
       // (single Close, no re-triggering the already-Pending MDM call)
       // instead of closing it, same as the marketplace admin's version.
       if (data.vtexDeactivateError) {
-        setUnpublishError(`Reverted to Pending in MDM, but deactivating the VTEX product failed: ${data.vtexDeactivateError}`)
+        setUnpublishError(`Reverted to Pending in MDM, but deactivating the marketplace product failed: ${data.vtexDeactivateError}`)
         setUnpublishDone(true)
         return
       }
@@ -1046,7 +1046,7 @@ const SellerProducts = () => {
         <Input label="CAS Number" placeholder="e.g. 8050-09-07" value={casFilter} onChange={e => setCasFilter(e.target.value)} />
         <Input label="HS Code" placeholder="e.g. 3806.10.00" value={hsFilter} onChange={e => setHsFilter(e.target.value)} />
         <Dropdown label="Status" options={STATUS_OPTIONS} value={statusFilter} onChange={(_, v) => setStatusFilter(v)} />
-        <Dropdown label="VTEX Link" options={VTEX_LINKED_OPTIONS} value={linkedFilter} onChange={(_, v) => setLinkedFilter(v)} />
+        <Dropdown label="Marketplace Link" options={VTEX_LINKED_OPTIONS} value={linkedFilter} onChange={(_, v) => setLinkedFilter(v)} />
       </div>
 
       {error && <div style={{ marginBottom: 12 }}><Alert type="error">{error}</Alert></div>}
@@ -1170,7 +1170,7 @@ const SellerProducts = () => {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
             Published
-            <InfoDot tooltip="Whether this product is published and live on the marketplace in VTEX." />
+            <InfoDot tooltip="Whether this product is published and live on the marketplace." />
           </div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
             PID / SID
@@ -1275,7 +1275,7 @@ const SellerProducts = () => {
                   )}
                   <button
                     onClick={() => setPriceInventoryProduct(p)}
-                    title="Manage this product's price and inventory in your own VTEX catalog — available before marketplace approval too."
+                    title="Manage this product's price and inventory. Other fields are only editable until your product is approved — after approval, you won't be able to change them."
                     style={{
                       background: '#fff', border: '1px solid #16a34a', borderRadius: 4, padding: '3px 10px',
                       fontSize: 11, fontWeight: 600, color: '#16a34a', cursor: 'pointer',
@@ -1309,7 +1309,7 @@ const SellerProducts = () => {
                 </div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, paddingTop: 2 }}>
-                <span onClick={() => handleStatusClick(p)} style={{ cursor: 'pointer' }} title="Click to check live MDM + VTEX status">
+                <span onClick={() => handleStatusClick(p)} style={{ cursor: 'pointer' }} title="Click to check live MDM + marketplace status">
                   <Tag bgColor={STATUS_COLORS[p.status] ?? '#9E9E9E'} color="#fff">{p.status}</Tag>
                 </span>
                 {p.status === 'rejected' && (
@@ -1402,9 +1402,9 @@ const SellerProducts = () => {
                 2026-10-12), so this isn't just the post-action intent anymore,
                 it's what's about to actually happen. */}
             <div style={{ fontSize: 12, color: '#475569', marginBottom: 14 }}>
-              Current VTEX status:{' '}
+              Current marketplace status:{' '}
               {!confirmUnpublishProduct.vtex?.vtex_product_id ? (
-                <span style={{ color: '#999' }}>not linked — nothing to deactivate on VTEX</span>
+                <span style={{ color: '#999' }}>not linked — nothing to deactivate on the marketplace</span>
               ) : vtexStatusLoading ? (
                 <Spinner size={14} />
               ) : vtexStatusError ? (
@@ -1416,7 +1416,7 @@ const SellerProducts = () => {
               )}
             </div>
             <div style={{ fontSize: 13, color: '#475569', marginBottom: 16 }}>
-              This reverts the product's status back to Pending Approval in MDM for re-review. If it's linked to a VTEX product, that product is also deactivated and removed from the live TradeChem Marketplace storefront. Are you sure you want to continue?
+              This reverts the product's status back to Pending Approval in MDM for re-review. If it's linked to a marketplace product, that product is also deactivated and removed from the live TradeChem Marketplace storefront. Are you sure you want to continue?
             </div>
             {unpublishError && <div style={{ marginBottom: 12 }}><Alert type={unpublishDone ? 'warning' : 'error'}>{unpublishError}</Alert></div>}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
