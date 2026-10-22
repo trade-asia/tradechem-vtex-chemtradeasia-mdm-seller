@@ -33,6 +33,8 @@ const PriceInventoryModal = ({ product, onClose }) => {
   const [brands, setBrands] = useState([])
   const [categories, setCategories] = useState([])
   const [warehouses, setWarehouses] = useState([])
+  const [brandsDebug, setBrandsDebug] = useState(null)
+  const [categoriesDebug, setCategoriesDebug] = useState(null)
 
   const [activeTab, setActiveTab] = useState('')
 
@@ -76,6 +78,8 @@ const PriceInventoryModal = ({ product, onClose }) => {
           setLinked(false)
           setBrands(data.brands ?? [])
           setCategories(data.categories ?? [])
+          setBrandsDebug(data.brandsDebug ?? null)
+          setCategoriesDebug(data.categoriesDebug ?? null)
           setActiveTab(TABS_CREATE[0])
         }
         setPrice(data.price ? String(data.price) : '')
@@ -216,6 +220,11 @@ const PriceInventoryModal = ({ product, onClose }) => {
                   value={brandId}
                   onChange={(_, v) => setBrandId(v)}
                 />
+                {brandsDebug && (
+                  <div style={{ fontSize: 11, color: '#92400e', background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 4, padding: '6px 10px', wordBreak: 'break-word' }}>
+                    No brands found in your VTEX account, but VTEX returned data we couldn't parse — raw response: {brandsDebug}
+                  </div>
+                )}
                 <Dropdown
                   label="Category *"
                   placeholder="Select a category..."
@@ -223,6 +232,11 @@ const PriceInventoryModal = ({ product, onClose }) => {
                   value={categoryId}
                   onChange={(_, v) => setCategoryId(v)}
                 />
+                {categoriesDebug && (
+                  <div style={{ fontSize: 11, color: '#92400e', background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 4, padding: '6px 10px', wordBreak: 'break-word' }}>
+                    No categories found in your VTEX account, but VTEX returned data we couldn't parse — raw response: {categoriesDebug}
+                  </div>
+                )}
                 <Input label="Reference code" value={product.sku} disabled />
               </div>
             )}

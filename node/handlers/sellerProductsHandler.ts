@@ -486,11 +486,11 @@ export async function getSellerPriceInventory(ctx: ServiceContext<Clients>) {
     }
   }
 
-  let brands: any[] = []
-  let categories: any[] = []
+  let brandsResult: { items: any[]; raw: any }
+  let categoriesResult: { items: any[]; raw: any }
   let warehouses: any[] = []
   try {
-    [brands, categories, warehouses] = await Promise.all([
+    [brandsResult, categoriesResult, warehouses] = await Promise.all([
       ctx.clients.sellerCatalog.listBrands(userToken),
       ctx.clients.sellerCatalog.getCategoryTree(userToken),
       ctx.clients.sellerCatalog.listWarehouses(userToken),
@@ -503,22 +503,43 @@ export async function getSellerPriceInventory(ctx: ServiceContext<Clients>) {
   // Flattened for a plain dropdown — the tree's depth isn't shown anywhere
   // else in this app either (see marketplaceVtexClient.ts's own category
   // walk for the same pattern), indentation by depth is enough context.
+  // Confirmed live 2026-10-22: each node is { value: {id, name, isActive},
+  // children: [...] } — id/name sit under .value, not the node itself.
   const flatCategories: { id: string; name: string; depth: number }[] = []
   const walk = (nodes: any[], depth: number) => {
     for (const node of nodes ?? []) {
-      const id = node?.id ?? node?.Id
-      const name = node?.name ?? node?.Name
-      if (id != null) flatCategories.push({ id: String(id), name: `${'— '.repeat(depth)}${name}`, depth })
+      const value = node?.value ?? node
+      const id = value?.id ?? value?.Id
+      const name = value?.name ?? value?.Name
+      if (id != null && value?.isActive !== false) flatCategories.push({ id: String(id), name: `${'— '.repeat(depth)}${name}`, depth })
       if (Array.isArray(node?.children)) walk(node.children, depth + 1)
     }
   }
-  walk(categories, 0)
+  walk(categoriesResult.items, 0)
+
+  // Diagnostic, not a guess: if parsing found nothing but VTEX's raw
+  // response wasn't an empty/trivial payload, surface the raw JSON instead
+  // of silently showing an empty dropdown — this is a beta API with no
+  // confirmed response schema, so "empty after parsing" could mean either
+  // a genuinely empty account or a wrapper key we didn't anticipate.
+  const rawNonTrivial = (raw: any) => {
+    if (raw == null) return false
+    try { return JSON.stringify(raw) !== '[]' && JSON.stringify(raw) !== '{}' } catch { return false }
+  }
+  const brandsDebug = brandsResult.items.length === 0 && rawNonTrivial(brandsResult.raw)
+    ? (() => { try { return JSON.stringify(brandsResult.raw).slice(0, 2000) } catch { return String(brandsResult.raw) } })()
+    : undefined
+  const categoriesDebug = flatCategories.length === 0 && rawNonTrivial(categoriesResult.raw)
+    ? (() => { try { return JSON.stringify(categoriesResult.raw).slice(0, 2000) } catch { return String(categoriesResult.raw) } })()
+    : undefined
 
   ctx.body = {
     success: true,
     linked: false,
-    brands: brands.map((b: any) => ({ id: String(b.id ?? b.Id), name: b.name ?? b.Name })),
+    brands: brandsResult.items.map((b: any) => ({ id: String(b.id ?? b.Id), name: b.name ?? b.Name })),
+    brandsDebug,
     categories: flatCategories,
+    categoriesDebug,
     warehouses: warehouses.map((w: any) => ({ id: w.id, name: w.name })),
   }
 }
