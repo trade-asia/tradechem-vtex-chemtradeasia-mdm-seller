@@ -222,6 +222,35 @@ export class MdmClient extends ExternalClient {
     return res?.data ?? res
   }
 
+  // Arbitrary per-product JSONB bucket MDM added 2026-10-22, at our request —
+  // unvalidated on their side, shown read-only on their admin panel's
+  // Metadata tab with a last-synced timestamp. POST REPLACES the whole
+  // object rather than merging, so every write here has to send the full
+  // current contents back, not just the changed keys — see
+  // sellerProductsHandler.ts's savePriceInventory for the read-modify-write
+  // this requires. 404 on GET means nothing's been pushed yet.
+  public async getProductMetadata(token: string, vtexProductId: string): Promise<Record<string, any> | null> {
+    try {
+      const res: any = await this.http.get(
+        this.url(`/vtex/products/${vtexProductId}/metadata`),
+        { headers: { Authorization: `Bearer ${token}` } }
+      )
+      return res?.data?.data ?? res?.data ?? null
+    } catch (err: any) {
+      if (err?.response?.status === 404) return null
+      throw err
+    }
+  }
+
+  public async setProductMetadata(token: string, vtexProductId: string, data: Record<string, any>): Promise<any> {
+    const res: any = await this.http.post(
+      this.url(`/vtex/products/${vtexProductId}/metadata`),
+      { data },
+      { headers: { Authorization: `Bearer ${token}` } }
+    )
+    return res?.data ?? res
+  }
+
   public async deleteProductMedia(token: string, mediaId: number): Promise<void> {
     await this.http.delete(this.url(`/vtex/media/${mediaId}`), {
       headers: { Authorization: `Bearer ${token}` },

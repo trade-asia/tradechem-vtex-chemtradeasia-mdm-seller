@@ -179,6 +179,67 @@ export async function getMarketplaceWarehouseMap(
   return map
 }
 
+// Price & Inventory self-service (2026-10-22, at the seller's request) —
+// writes directly to the marketplace's VTEX catalog, same mechanism/shape
+// as the marketplace app's own VtexPricingClient.setPrice /
+// VtexSearchClient.setSkuInventory, just called cross-account here. Each
+// save also gets mirrored into MDM's new metadata endpoint (see
+// sellerProductsHandler.ts) so the admin panel's Metadata tab shows what
+// was last pushed — VTEX stays the actual source of truth for price/stock,
+// MDM's copy is read-only visibility only.
+const FALLBACK_TRADE_POLICY_IDS = ['1', '2']
+
+export async function setMarketplacePrice(
+  vtexAppKey: string,
+  vtexAppToken: string,
+  vtexSkuId: number,
+  price: number,
+  listPrice?: number,
+  tradePolicyIds: string[] = FALLBACK_TRADE_POLICY_IDS
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    await axios.put(
+      `${pricingBaseUrl()}/pricing/prices/${vtexSkuId}`,
+      {
+        costPrice: price,
+        markup: 0,
+        listPrice: listPrice || undefined,
+        fixedPrices: tradePolicyIds.map(tradePolicyId => ({
+          tradePolicyId, value: price, listPrice: listPrice || undefined, minQuantity: 1,
+        })),
+      },
+      { headers: authHeaders(vtexAppKey, vtexAppToken), timeout: 15000 }
+    )
+    return { success: true }
+  } catch (err: any) {
+    const data = err?.response?.data
+    const detail = (data?.Message ?? data?.message ?? (typeof data === 'string' ? data : null)) ?? err?.message ?? 'Unknown error'
+    return { success: false, error: detail }
+  }
+}
+
+export async function setMarketplaceInventory(
+  vtexAppKey: string,
+  vtexAppToken: string,
+  vtexSkuId: number,
+  warehouseId: string,
+  quantity: number,
+  unlimitedQuantity: boolean
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    await axios.put(
+      `${baseUrl()}/api/logistics/pvt/inventory/skus/${vtexSkuId}/warehouses/${warehouseId}`,
+      { quantity, unlimitedQuantity, dateUtcOnBalanceSystem: new Date().toISOString() },
+      { headers: authHeaders(vtexAppKey, vtexAppToken), timeout: 15000 }
+    )
+    return { success: true }
+  } catch (err: any) {
+    const data = err?.response?.data
+    const detail = (data?.Message ?? data?.message ?? (typeof data === 'string' ? data : null)) ?? err?.message ?? 'Unknown error'
+    return { success: false, error: detail }
+  }
+}
+
 export async function getMarketplaceVtexProductStatus(
   vtexAppKey: string,
   vtexAppToken: string,

@@ -46,6 +46,10 @@
       "path": "/_v/mdm-seller/products/export",
       "public": true
     },
+    "sellerProductPriceInventory": {
+      "path": "/_v/mdm-seller/products/price-inventory",
+      "public": true
+    },
     "sellerProductMediaServe": {
       "path": "/_v/mdm-seller/media",
       "public": true

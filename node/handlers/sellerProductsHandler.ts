@@ -4,6 +4,7 @@ import { Clients } from '../clients'
 import { getMdmToken, clearMdmToken } from '../helpers/getMdmToken'
 import { ensureSellerSynced } from '../helpers/sellerSync'
 import { readMdmConfig, forceRefreshMdmConfig } from './devSettingsHandler'
+import { readBody } from '../helpers/readBody'
 import {
   deactivateMarketplaceVtexProduct,
   getMarketplaceVtexProductStatus,
@@ -104,6 +105,21 @@ function mdmErrDetail(err: any): string {
   }
   if (data.message) return data.message
   try { return JSON.stringify(data) } catch { return err.message }
+}
+
+// VTEX's raw error shape (same pattern as the marketplace app's own
+// importStepsHandler.ts) — used for the Seller Catalog/Pricing/Logistics
+// calls above, which are a separate error family from MDM's own.
+function vtexErrDetail(err: any): string {
+  const status = err?.response?.status
+  const prefix = status ? `HTTP ${status}: ` : ''
+  const data = err?.response?.data
+  if (!data) return `${prefix}${err?.message ?? 'no response body from VTEX'}`
+  if (typeof data === 'string') return `${prefix}${data.slice(0, 300)}`
+  if (data.Message) return `${prefix}${data.Message}`
+  if (data.message) return `${prefix}${data.message}`
+  if (data.error) return `${prefix}${data.error}`
+  try { return `${prefix}${JSON.stringify(data)}` } catch { return `${prefix}${err.message}` }
 }
 
 interface MdmAuth {
@@ -363,6 +379,231 @@ export async function exportSellerProducts(ctx: ServiceContext<Clients>) {
   }
 
   ctx.body = { success: true, columns: EXPORT_COLUMNS, rows, total: rows.length }
+}
+
+// Beta API, no retrievable request/response schema (see SellerCatalogClient
+// .createProduct's own note) — defensively tries every plausible shape for
+// the created product/SKU ids rather than assuming one, so a wrong guess at
+// least surfaces as a clear "couldn't find the ids in VTEX's response"
+// instead of a silent crash.
+function extractSellerIds(res: any): { sellerPid?: string; sellerSid?: string } {
+  const productId = res?.Id ?? res?.ProductId ?? res?.productId ?? res?.Product?.Id
+  const skuId = res?.SkuId ?? res?.Sku?.Id ?? res?.Skus?.[0]?.Id ?? res?.skuId ?? res?.Sku?.id
+  return {
+    sellerPid: productId != null ? String(productId) : undefined,
+    sellerSid: skuId != null ? String(skuId) : undefined,
+  }
+}
+
+// GET /_v/mdm-seller/products/price-inventory?mdmProductId=&vtexProductId=&mdmSku=
+// Backs the Price & Inventory modal — which is really "create this product
+// in the seller's own VTEX account, then manage its price/inventory
+// natively" (2026-10-22, the client's explicit request; the marketplace's
+// own admin-imported product is untouched by any of this).
+//
+// MDM's new metadata endpoint (vtex_product_id-keyed) is the link record:
+// once this modal has created the seller's own product/SKU, their ids
+// (sellerPid/sellerSid) live there. On every open, this checks metadata
+// first and — if present — confirms with a live call that VTEX still has
+// that product, rather than trusting a possibly-stale record. Confirmed:
+// creation fields (name/brand/category/dimensions) are locked and only
+// Price/Inventory stay editable. Not confirmed (never created, or VTEX no
+// longer has it): the full creation form is shown instead.
+export async function getSellerPriceInventory(ctx: ServiceContext<Clients>) {
+  ctx.status = 200
+  const vtexProductId = (ctx.query as any).vtexProductId as string | undefined
+  if (!vtexProductId) {
+    ctx.body = { success: false, error: 'vtexProductId is required' }
+    return
+  }
+  const auth = await mdmAuth(ctx)
+  if (!auth) return
+
+  const userToken = (ctx.vtex as any)?.adminUserAuthToken
+
+  let metadata: Record<string, any> | null = null
+  try {
+    metadata = await withAuthRetry(ctx, auth, a => ctx.clients.mdm.getProductMetadata(a.token, vtexProductId))
+  } catch {
+    // Best-effort — a metadata fetch failure just falls through to "not
+    // linked yet", same as a product this modal has genuinely never touched.
+  }
+
+  if (metadata?.sellerPid) {
+    try {
+      const product = await ctx.clients.sellerCatalog.getProduct(Number(metadata.sellerPid), userToken)
+      if (product) {
+        const saved = metadata.vtexPriceInventory ?? {}
+        const warehouses = await ctx.clients.sellerCatalog.listWarehouses(userToken)
+        ctx.body = {
+          success: true,
+          linked: true,
+          sellerPid: metadata.sellerPid,
+          sellerSid: metadata.sellerSid,
+          price: saved.price ?? '',
+          listPrice: saved.listPrice ?? '',
+          warehouseId: saved.warehouseId ?? '',
+          quantity: saved.quantity ?? '',
+          unlimitedQuantity: !!saved.unlimitedQuantity,
+          warehouses: warehouses.map((w: any) => ({ id: w.id, name: w.name })),
+        }
+        return
+      }
+    } catch {
+      // VTEX no longer has this product (deleted, or the stored id is
+      // stale/wrong) — fall through to the not-linked/creation path below.
+    }
+  }
+
+  let brands: any[] = []
+  let categories: any[] = []
+  let warehouses: any[] = []
+  try {
+    [brands, categories, warehouses] = await Promise.all([
+      ctx.clients.sellerCatalog.listBrands(userToken),
+      ctx.clients.sellerCatalog.getCategoryTree(userToken),
+      ctx.clients.sellerCatalog.listWarehouses(userToken),
+    ])
+  } catch (err: any) {
+    ctx.body = { success: false, error: "Couldn't load your VTEX catalog options", detail: vtexErrDetail(err) }
+    return
+  }
+
+  // Flattened for a plain dropdown — the tree's depth isn't shown anywhere
+  // else in this app either (see marketplaceVtexClient.ts's own category
+  // walk for the same pattern), indentation by depth is enough context.
+  const flatCategories: { id: string; name: string; depth: number }[] = []
+  const walk = (nodes: any[], depth: number) => {
+    for (const node of nodes ?? []) {
+      const id = node?.id ?? node?.Id
+      const name = node?.name ?? node?.Name
+      if (id != null) flatCategories.push({ id: String(id), name: `${'— '.repeat(depth)}${name}`, depth })
+      if (Array.isArray(node?.children)) walk(node.children, depth + 1)
+    }
+  }
+  walk(categories, 0)
+
+  ctx.body = {
+    success: true,
+    linked: false,
+    brands: brands.map((b: any) => ({ id: String(b.id ?? b.Id), name: b.name ?? b.Name })),
+    categories: flatCategories,
+    warehouses: warehouses.map((w: any) => ({ id: w.id, name: w.name })),
+  }
+}
+
+// POST /_v/mdm-seller/products/price-inventory
+// Body (first save): { vtexProductId, name, refId, brandId, categoryId,
+//   taxCode?, ean?, packageWeight, packageWidth, packageHeight,
+//   packageLength, price, listPrice?, warehouseId, quantity,
+//   unlimitedQuantity }
+// Body (already linked — sellerPid/sellerSid present): only price/
+//   inventory fields are read; creation is skipped entirely.
+//
+// Creates the product+SKU in the seller's OWN VTEX account (their live
+// session token — see SellerCatalogClient's own note on why this can't run
+// as a background job), sets price/inventory on it, then mirrors
+// sellerPid/sellerSid + the saved values into MDM's metadata (read-modify-
+// write, since MDM's endpoint replaces the whole stored object rather than
+// merging — see getProductMetadata's own comment).
+export async function saveSellerPriceInventory(ctx: ServiceContext<Clients>) {
+  ctx.status = 200
+  const raw = await readBody(ctx)
+  let parsed: any = {}
+  try { parsed = JSON.parse(raw) } catch {}
+
+  const {
+    vtexProductId, name, refId, brandId, categoryId, taxCode, ean,
+    packageWeight, packageWidth, packageHeight, packageLength,
+    price, listPrice, warehouseId, quantity, unlimitedQuantity,
+    sellerPid, sellerSid,
+  } = parsed
+
+  if (!vtexProductId || !(Number(price) > 0) || !warehouseId || (!unlimitedQuantity && !(Number(quantity) > 0))) {
+    ctx.body = { success: false, error: 'vtexProductId, a price greater than zero, warehouseId and quantity (or unlimited) are required' }
+    return
+  }
+
+  const auth = await mdmAuth(ctx)
+  if (!auth) return
+
+  const userToken = (ctx.vtex as any)?.adminUserAuthToken
+
+  let newSellerPid = sellerPid ? String(sellerPid) : undefined
+  let newSellerSid = sellerSid ? String(sellerSid) : undefined
+
+  if (!newSellerPid || !newSellerSid) {
+    if (!name || !brandId || !categoryId || !(Number(packageWeight) > 0) || !(Number(packageWidth) > 0) || !(Number(packageHeight) > 0) || !(Number(packageLength) > 0)) {
+      ctx.body = { success: false, error: 'name, brand, category and all package dimensions are required to create this product' }
+      return
+    }
+    try {
+      const created = await ctx.clients.sellerCatalog.createProduct({
+        Name: name,
+        BrandId: Number(brandId),
+        CategoryId: Number(categoryId),
+        RefId: refId || undefined,
+        TaxCode: taxCode || undefined,
+        Ean: ean || undefined,
+        PackagedWeightKg: Number(packageWeight),
+        PackagedWidth: Number(packageWidth),
+        PackagedHeight: Number(packageHeight),
+        PackagedLength: Number(packageLength),
+      }, userToken)
+      const ids = extractSellerIds(created)
+      if (!ids.sellerPid || !ids.sellerSid) {
+        ctx.body = {
+          success: false,
+          error: "VTEX created the product but didn't return a recognizable product/SKU id",
+          detail: (() => { try { return JSON.stringify(created) } catch { return String(created) } })(),
+        }
+        return
+      }
+      newSellerPid = ids.sellerPid
+      newSellerSid = ids.sellerSid
+    } catch (err: any) {
+      ctx.body = { success: false, error: "VTEX rejected creating this product in your catalog", detail: vtexErrDetail(err) }
+      return
+    }
+  }
+
+  const skuId = Number(newSellerSid)
+  try {
+    await ctx.clients.sellerPricing.setPrice(skuId, Number(price), Number(listPrice) || undefined, userToken)
+    await ctx.clients.sellerCatalog.setInventory(skuId, String(warehouseId), Number(quantity) || 0, !!unlimitedQuantity, userToken)
+  } catch (err: any) {
+    ctx.body = {
+      success: false,
+      error: 'The product was created, but VTEX rejected the price/inventory update',
+      detail: vtexErrDetail(err),
+      sellerPid: newSellerPid,
+      sellerSid: newSellerSid,
+    }
+    return
+  }
+
+  let metadataError: string | undefined
+  try {
+    const current = (await withAuthRetry(ctx, auth, a => ctx.clients.mdm.getProductMetadata(a.token, vtexProductId))) ?? {}
+    const merged = {
+      ...current,
+      sellerPid: newSellerPid,
+      sellerSid: newSellerSid,
+      vtexPriceInventory: {
+        price: Number(price),
+        listPrice: Number(listPrice) || null,
+        warehouseId: String(warehouseId),
+        quantity: unlimitedQuantity ? null : Number(quantity),
+        unlimitedQuantity: !!unlimitedQuantity,
+        updatedAt: new Date().toISOString(),
+      },
+    }
+    await withAuthRetry(ctx, auth, a => ctx.clients.mdm.setProductMetadata(a.token, vtexProductId, merged))
+  } catch (err: any) {
+    metadataError = mdmErrDetail(err)
+  }
+
+  ctx.body = { success: true, sellerPid: newSellerPid, sellerSid: newSellerSid, metadataError }
 }
 
 // POST /_v/mdm-seller/products/unpublish?mdmProductId=... — flips an Active

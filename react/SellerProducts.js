@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom'
 import { Spinner, Alert, Input, Dropdown, Button, Modal, Tag, Pagination } from 'vtex.styleguide'
 import ProductStatusModal from './ProductStatusModal'
 import DocumentsModal from './DocumentsModal'
+import PriceInventoryModal from './PriceInventoryModal'
 
 const BASE = '/_v/mdm-seller'
 const PER_PAGE = 20
@@ -644,6 +645,7 @@ const SellerProducts = () => {
   const [showImport, setShowImport] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState(null)
+  const [priceInventoryProduct, setPriceInventoryProduct] = useState(null)
   const [rejectionProduct, setRejectionProduct] = useState(null)
   const [confirmUnpublishProduct, setConfirmUnpublishProduct] = useState(null)
   const [unpublishingId, setUnpublishingId] = useState(null)
@@ -1131,6 +1133,18 @@ const SellerProducts = () => {
                   >
                     {editLoadingId === p.id ? '…' : 'Edit'}
                   </button>
+                  {p.vtex?.linked && p.vtex?.vtex_product_id && (
+                    <button
+                      onClick={() => setPriceInventoryProduct(p)}
+                      title="Manage this product's price and inventory in your own VTEX catalog"
+                      style={{
+                        background: '#fff', border: '1px solid #16a34a', borderRadius: 4, padding: '3px 10px',
+                        fontSize: 11, fontWeight: 600, color: '#16a34a', cursor: 'pointer',
+                      }}
+                    >
+                      Price &amp; Inventory
+                    </button>
+                  )}
                   {p.status === 'rejected' && (
                     <button
                       onClick={() => setRejectionProduct(p)}
@@ -1215,6 +1229,7 @@ const SellerProducts = () => {
       )}
       {mediaProduct && <MediaModal product={mediaProduct} onClose={() => setMediaProduct(null)} />}
       {documentsProduct && <DocumentsModal product={documentsProduct} onClose={() => setDocumentsProduct(null)} />}
+      {priceInventoryProduct && <PriceInventoryModal product={priceInventoryProduct} onClose={() => setPriceInventoryProduct(null)} />}
       {rejectionProduct && <RejectionReasonModal product={rejectionProduct} onClose={() => setRejectionProduct(null)} />}
       {confirmUnpublishProduct && (
         <Modal

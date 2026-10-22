@@ -21,10 +21,52 @@ export class SellerCatalogClient extends ExternalClient {
   // — the Seller Portal Catalog API rejects app tokens for product-read, but
   // accepts the account user who owns the catalog. Falls back to the app token
   // (events have no user context).
+  private userHeaders(userToken?: string) {
+    return userToken ? { VtexIdclientAutCookie: userToken, 'Proxy-Authorization': userToken } : {}
+  }
+
   public async getProduct(productId: number, userToken?: string): Promise<any> {
-    const headers: any = userToken
-      ? { VtexIdclientAutCookie: userToken, 'Proxy-Authorization': userToken }
-      : {}
-    return this.http.get(`/api/catalog-seller-portal/products/${productId}`, { headers })
+    return this.http.get(`/api/catalog-seller-portal/products/${productId}`, { headers: this.userHeaders(userToken) })
+  }
+
+  public async listBrands(userToken?: string): Promise<any[]> {
+    const res: any = await this.http.get('/api/catalog-seller-portal/brands', { headers: this.userHeaders(userToken) })
+    return Array.isArray(res) ? res : (Array.isArray(res?.data) ? res.data : [])
+  }
+
+  public async getCategoryTree(userToken?: string): Promise<any[]> {
+    const res: any = await this.http.get('/api/catalog-seller-portal/category-tree', { headers: this.userHeaders(userToken) })
+    return Array.isArray(res) ? res : (Array.isArray(res?.data) ? res.data : [])
+  }
+
+  // Beta API, no published request/response schema we could retrieve (see
+  // sellerProductsHandler.ts's own note) — field names are a best-confidence
+  // guess following the classic Catalog API's own conventions (Name,
+  // BrandId, CategoryId, RefId, PackagedWeightKg/Width/Height/Length), on
+  // the theory that this is a thin layer over the same underlying VTEX
+  // product/SKU model. Creates product AND its first SKU in one call — no
+  // separate SKU-create endpoint exists in this API family at all. To be
+  // corrected against the raw response/error on the first live attempt.
+  public async createProduct(payload: any, userToken?: string): Promise<any> {
+    return this.http.post('/api/catalog-seller-portal/products', payload, { headers: this.userHeaders(userToken) })
+  }
+
+  public async listWarehouses(userToken?: string): Promise<any[]> {
+    const res: any = await this.http.get('/api/logistics/pvt/configuration/warehouses', { headers: this.userHeaders(userToken) })
+    return Array.isArray(res) ? res : []
+  }
+
+  public async setInventory(
+    skuId: number,
+    warehouseId: string,
+    quantity: number,
+    unlimitedQuantity: boolean,
+    userToken?: string
+  ): Promise<any> {
+    return this.http.put(
+      `/api/logistics/pvt/inventory/skus/${skuId}/warehouses/${warehouseId}`,
+      { quantity, unlimitedQuantity, dateUtcOnBalanceSystem: new Date().toISOString() },
+      { headers: this.userHeaders(userToken) }
+    )
   }
 }
