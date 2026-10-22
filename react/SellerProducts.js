@@ -56,22 +56,50 @@ const STATUS_COLORS = {
 // the space savings that's worth it on the admin table's longer list.
 const COLS = '1fr 150px 90px 140px'
 
-// Small rounded "!" badge + native title tooltip — used wherever a column
-// or control needs a one-line explainer of which of the two separate
-// statuses (MDM's own internal workflow status vs whether the product is
-// actually published/live on the marketplace in VTEX) it's referring to.
-const InfoDot = ({ tooltip }) => (
-  <span
-    title={tooltip}
-    style={{
-      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-      width: 14, height: 14, borderRadius: '50%', background: '#94a3b8', color: '#fff',
-      fontSize: 10, fontWeight: 700, lineHeight: 1, cursor: 'default', flexShrink: 0,
-    }}
-  >
-    !
-  </span>
-)
+// Small rounded "!" badge — click to reveal its tooltip (not hover, so it
+// works the same on touch devices), click again or click anywhere else to
+// dismiss. Used wherever a column or control needs a one-line explainer of
+// which of the two separate statuses (MDM's own internal workflow status
+// vs whether the product is actually published/live on the marketplace in
+// VTEX) it's referring to, or what the Tradechem PID/SID actually are.
+const InfoDot = ({ tooltip }) => {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDocClick = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [open])
+
+  return (
+    <span ref={ref} style={{ position: 'relative', display: 'inline-flex' }}>
+      <span
+        onClick={e => { e.stopPropagation(); setOpen(o => !o) }}
+        style={{
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          width: 14, height: 14, borderRadius: '50%', background: '#94a3b8', color: '#fff',
+          fontSize: 10, fontWeight: 700, lineHeight: 1, cursor: 'pointer', flexShrink: 0,
+        }}
+      >
+        !
+      </span>
+      {open && (
+        <div
+          style={{
+            position: 'absolute', top: '140%', left: '50%', transform: 'translateX(-50%)',
+            background: '#142032', color: '#fff', fontSize: 11, lineHeight: 1.4,
+            padding: '6px 10px', borderRadius: 4, width: 220, textAlign: 'left',
+            boxShadow: '0 2px 10px rgba(0,0,0,0.25)', zIndex: 30,
+          }}
+        >
+          {tooltip}
+        </div>
+      )}
+    </span>
+  )
+}
 
 const L = ({ c }) => (
   <span style={{ fontSize: 11, fontWeight: 700, color: '#666' }}>{c}</span>
@@ -1077,14 +1105,17 @@ const SellerProducts = () => {
         }}>
           <div>Product</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            MDM Product Status
+            MDM Status
             <InfoDot tooltip="MDM's own internal workflow status for this product." />
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             Published
             <InfoDot tooltip="Whether this product is published and live on the marketplace in VTEX." />
           </div>
-          <div title="PID = Tradechem Product ID, SID = Tradechem SKU ID">Tradechem PID / SID</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            PID / SID
+            <InfoDot tooltip="Once your product is published, the marketplace gives it a new Product ID (PID) and SKU ID (SID) of its own." />
+          </div>
         </div>
 
         {loading ? (
@@ -1217,18 +1248,24 @@ const SellerProducts = () => {
                   </button>
                 )}
               </div>
-              <div style={{ paddingTop: 2 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingTop: 2 }}>
+                <Tag bgColor={p.vtex?.linked ? '#8BC34A' : '#9E9E9E'} color="#fff">
+                  {p.vtex?.linked ? 'published' : 'not published'}
+                </Tag>
                 <InfoDot tooltip={p.vtex?.linked ? 'Published on marketplace.' : 'Not published on marketplace.'} />
               </div>
-              <div style={{ fontSize: 12, color: '#666', paddingTop: 2, fontFamily: 'monospace' }} title="PID = Tradechem Product ID, SID = Tradechem SKU ID">
-                {p.vtex?.linked
-                  // SID shows "-" until MDM's own GET /vtex/products starts
-                  // returning vtex_sku_id on read (their write side already
-                  // accepts it as of 2026-10-15, read side doesn't echo it
-                  // back yet) — this will pick it up automatically the
-                  // moment that's live, no further change needed here.
-                  ? `${p.vtex.vtex_product_id} / ${p.vtex.vtex_sku_id ?? '-'}`
-                  : <span style={{ fontFamily: 'inherit' }}>Not Linked</span>}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#666', paddingTop: 2, fontFamily: 'monospace' }}>
+                <span>
+                  {p.vtex?.linked
+                    // SID shows "-" until MDM's own GET /vtex/products starts
+                    // returning vtex_sku_id on read (their write side already
+                    // accepts it as of 2026-10-15, read side doesn't echo it
+                    // back yet) — this will pick it up automatically the
+                    // moment that's live, no further change needed here.
+                    ? `${p.vtex.vtex_product_id} / ${p.vtex.vtex_sku_id ?? '-'}`
+                    : <span style={{ fontFamily: 'inherit' }}>Not Linked</span>}
+                </span>
+                <InfoDot tooltip="Once your product is published, the marketplace gives it a new Product ID (PID) and SKU ID (SID) of its own." />
               </div>
             </div>
             )
