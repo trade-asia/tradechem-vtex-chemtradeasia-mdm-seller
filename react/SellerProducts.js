@@ -54,7 +54,24 @@ const STATUS_COLORS = {
 // already live there) — Actions stays inline below it, not a dropdown menu:
 // only 2-3 actions per row here, so a menu would just add a click without
 // the space savings that's worth it on the admin table's longer list.
-const COLS = '1fr 110px 140px'
+const COLS = '1fr 150px 90px 140px'
+
+// Small rounded "!" badge + native title tooltip — used wherever a column
+// or control needs a one-line explainer of which of the two separate
+// statuses (MDM's own internal workflow status vs whether the product is
+// actually published/live on the marketplace in VTEX) it's referring to.
+const InfoDot = ({ tooltip }) => (
+  <span
+    title={tooltip}
+    style={{
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      width: 14, height: 14, borderRadius: '50%', background: '#94a3b8', color: '#fff',
+      fontSize: 10, fontWeight: 700, lineHeight: 1, cursor: 'default', flexShrink: 0,
+    }}
+  >
+    !
+  </span>
+)
 
 const L = ({ c }) => (
   <span style={{ fontSize: 11, fontWeight: 700, color: '#666' }}>{c}</span>
@@ -1059,7 +1076,14 @@ const SellerProducts = () => {
           color: '#6b7c93', letterSpacing: '0.6px', textTransform: 'uppercase',
         }}>
           <div>Product</div>
-          <div>Status</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            MDM Product Status
+            <InfoDot tooltip="MDM's own internal workflow status for this product." />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            Published
+            <InfoDot tooltip="Whether this product is published and live on the marketplace in VTEX." />
+          </div>
           <div title="PID = Tradechem Product ID, SID = Tradechem SKU ID">Tradechem PID / SID</div>
         </div>
 
@@ -1135,18 +1159,16 @@ const SellerProducts = () => {
                   >
                     {editLoadingId === p.id ? '…' : 'Edit'}
                   </button>
-                  {p.vtex?.linked && p.vtex?.vtex_product_id && (
-                    <button
-                      onClick={() => setPriceInventoryProduct(p)}
-                      title="Manage this product's price and inventory in your own VTEX catalog"
-                      style={{
-                        background: '#fff', border: '1px solid #16a34a', borderRadius: 4, padding: '3px 10px',
-                        fontSize: 11, fontWeight: 600, color: '#16a34a', cursor: 'pointer',
-                      }}
-                    >
-                      Price &amp; Inventory
-                    </button>
-                  )}
+                  <button
+                    onClick={() => setPriceInventoryProduct(p)}
+                    title="Manage this product's price and inventory in your own VTEX catalog — available before marketplace approval too."
+                    style={{
+                      background: '#fff', border: '1px solid #16a34a', borderRadius: 4, padding: '3px 10px',
+                      fontSize: 11, fontWeight: 600, color: '#16a34a', cursor: 'pointer',
+                    }}
+                  >
+                    Price &amp; Inventory
+                  </button>
                   {p.status === 'rejected' && (
                     <button
                       onClick={() => setRejectionProduct(p)}
@@ -1159,16 +1181,19 @@ const SellerProducts = () => {
                     </button>
                   )}
                   {p.status === 'active' && (
-                    <button
-                      onClick={() => handleRevertClick(p)}
-                      title="Revert to Pending Approval"
-                      style={{
-                        background: '#fff', border: '1px solid #b45309', borderRadius: 4, padding: '3px 10px',
-                        fontSize: 11, fontWeight: 600, color: '#b45309', cursor: 'pointer',
-                      }}
-                    >
-                      Revert to Pending
-                    </button>
+                    <>
+                      <button
+                        onClick={() => handleRevertClick(p)}
+                        title="Revert to Pending Approval"
+                        style={{
+                          background: '#fff', border: '1px solid #b45309', borderRadius: 4, padding: '3px 10px',
+                          fontSize: 11, fontWeight: 600, color: '#b45309', cursor: 'pointer',
+                        }}
+                      >
+                        Revert to Pending
+                      </button>
+                      <InfoDot tooltip="Internal product status." />
+                    </>
                   )}
                 </div>
               </div>
@@ -1191,6 +1216,9 @@ const SellerProducts = () => {
                     !
                   </button>
                 )}
+              </div>
+              <div style={{ paddingTop: 2 }}>
+                <InfoDot tooltip={p.vtex?.linked ? 'Published on marketplace.' : 'Not published on marketplace.'} />
               </div>
               <div style={{ fontSize: 12, color: '#666', paddingTop: 2, fontFamily: 'monospace' }} title="PID = Tradechem Product ID, SID = Tradechem SKU ID">
                 {p.vtex?.linked

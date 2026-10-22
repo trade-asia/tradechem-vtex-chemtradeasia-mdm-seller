@@ -59,7 +59,9 @@ const PriceInventoryModal = ({ product, onClose }) => {
     let cancelled = false
     setLoading(true)
     setLoadError(null)
-    fetch(`${BASE}/products/price-inventory?mdmProductId=${encodeURIComponent(product.id)}&vtexProductId=${encodeURIComponent(product.vtex?.vtex_product_id)}`)
+    const params = new URLSearchParams({ mdmProductId: product.id })
+    if (product.vtex?.vtex_product_id) params.set('vtexProductId', product.vtex.vtex_product_id)
+    fetch(`${BASE}/products/price-inventory?${params.toString()}`)
       .then(parseResponse)
       .then(data => {
         if (cancelled) return
@@ -107,7 +109,8 @@ const PriceInventoryModal = ({ product, onClose }) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          vtexProductId: product.vtex?.vtex_product_id,
+          mdmProductId: product.id,
+          vtexProductId: product.vtex?.vtex_product_id || undefined,
           sellerPid: linked ? sellerPid : undefined,
           sellerSid: linked ? sellerSid : undefined,
           name: product.name,
