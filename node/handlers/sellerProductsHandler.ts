@@ -390,9 +390,13 @@ export async function exportSellerProducts(ctx: ServiceContext<Clients>) {
 // the created product/SKU ids rather than assuming one, so a wrong guess at
 // least surfaces as a clear "couldn't find the ids in VTEX's response"
 // instead of a silent crash.
+// Confirmed live 2026-10-22 against VTEX's published response schema for
+// this endpoint: { id: "<product id>", skus: [{ id: "<sku id>" }, ...] }.
+// Kept defensively tolerant of a couple of capitalization variants in case
+// that ever drifts, but id/skus[0].id is the real, confirmed shape now.
 function extractSellerIds(res: any): { sellerPid?: string; sellerSid?: string } {
-  const productId = res?.Id ?? res?.ProductId ?? res?.productId ?? res?.Product?.Id
-  const skuId = res?.SkuId ?? res?.Sku?.Id ?? res?.Skus?.[0]?.Id ?? res?.skuId ?? res?.Sku?.id
+  const productId = res?.id ?? res?.Id
+  const skuId = res?.skus?.[0]?.id ?? res?.Skus?.[0]?.Id
   return {
     sellerPid: productId != null ? String(productId) : undefined,
     sellerSid: skuId != null ? String(skuId) : undefined,
@@ -540,7 +544,9 @@ export async function getSellerPriceInventory(ctx: ServiceContext<Clients>) {
   ctx.body = {
     success: true,
     linked: false,
-    brands: brandsResult.items.map((b: any) => ({ id: String(b.id ?? b.Id), name: b.name ?? b.Name })),
+    brands: brandsResult.items
+      .filter((b: any) => (b.isActive ?? b.IsActive) !== false)
+      .map((b: any) => ({ id: String(b.id ?? b.Id), name: b.name ?? b.Name })),
     brandsDebug,
     categories: flatCategories,
     categoriesDebug,
@@ -596,21 +602,46 @@ export async function saveSellerPriceInventory(ctx: ServiceContext<Clients>) {
       return
     }
     try {
+      // Confirmed live 2026-10-22 against VTEX's own published OpenAPI
+      // schema (github.com/vtex/openapi-schemas, "VTEX - Catalog API Seller
+      // Portal.json") — this replaces the earlier guessed flat shape, which
+      // VTEX rejected for missing skus/slug/status/categoryIds entirely.
+      // Real required fields: status, name, brandId, categoryIds (array),
+      // specs/attributes/images (arrays, empty is fine — no minItems),
+      // slug, skus (array, one entry here), origin. SKU weight is grams as
+      // an integer per the schema ("lighter than 1000 g"); our form
+      // collects kg like the rest of this app's dimension fields, so it's
+      // converted here.
+      const slug = `/${String(name).toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-+|-+$)/g, '')}`
       const created = await ctx.clients.sellerCatalog.createProduct({
-        Name: name,
-        // Confirmed live 2026-10-22: VTEX rejects these as numbers —
-        // "$.BrandId: The JSON value could not be converted to
-        // System.String" (HTTP 400, ModelStateInvalidException). Both IDs
-        // have to be sent as strings here, unlike the classic Catalog API.
-        BrandId: String(brandId),
-        CategoryId: String(categoryId),
-        RefId: refId || undefined,
-        TaxCode: taxCode || undefined,
-        Ean: ean || undefined,
-        PackagedWeightKg: Number(packageWeight),
-        PackagedWidth: Number(packageWidth),
-        PackagedHeight: Number(packageHeight),
-        PackagedLength: Number(packageLength),
+        status: 'active',
+        name,
+        brandId: String(brandId),
+        categoryIds: [String(categoryId)],
+        specs: [],
+        attributes: [],
+        slug,
+        images: [],
+        externalId: refId || undefined,
+        taxCode: taxCode || undefined,
+        // origin is this seller's own account — VTEX won't let a product
+        // whose origin is "marketplace" be altered, so it must be set to
+        // us, not left to default.
+        origin: ctx.vtex.account,
+        skus: [{
+          name,
+          isActive: true,
+          externalId: refId || undefined,
+          ean: ean || undefined,
+          weight: Math.round(Number(packageWeight) * 1000),
+          dimensions: {
+            width: Number(packageWidth),
+            height: Number(packageHeight),
+            length: Number(packageLength),
+          },
+          specs: null, // nullable when there's only one SKU, per the schema
+          images: [],
+        }],
       }, userToken)
       const ids = extractSellerIds(created)
       if (!ids.sellerPid || !ids.sellerSid) {

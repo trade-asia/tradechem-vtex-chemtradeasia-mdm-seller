@@ -56,8 +56,13 @@ export class SellerCatalogClient extends ExternalClient {
     return []
   }
 
+  // Confirmed live 2026-10-22 from VTEX's published schema: { data: [{id,
+  // name, isActive, ...}], _metadata: {total, from, to, ...} } — paginated
+  // by `from`/`to`, defaulting to only the first ~10 if omitted. 500 is
+  // comfortably past what a single seller's own brand list should ever
+  // need; revisit with real pagination if that stops being true.
   public async listBrands(userToken?: string): Promise<{ items: any[]; raw: any }> {
-    const res: any = await this.http.get('/api/catalog-seller-portal/brands', { headers: this.userHeaders(userToken) })
+    const res: any = await this.http.get('/api/catalog-seller-portal/brands?from=1&to=500', { headers: this.userHeaders(userToken) })
     return { items: this.extractList(res, ['data', 'items', 'Items', 'brands', 'Brands', 'result']), raw: res }
   }
 
@@ -72,14 +77,14 @@ export class SellerCatalogClient extends ExternalClient {
     return { items, raw: res }
   }
 
-  // Beta API, no published request/response schema we could retrieve (see
-  // sellerProductsHandler.ts's own note) — field names are a best-confidence
-  // guess following the classic Catalog API's own conventions (Name,
-  // BrandId, CategoryId, RefId, PackagedWeightKg/Width/Height/Length), on
-  // the theory that this is a thin layer over the same underlying VTEX
-  // product/SKU model. Creates product AND its first SKU in one call — no
-  // separate SKU-create endpoint exists in this API family at all. To be
-  // corrected against the raw response/error on the first live attempt.
+  // Beta API — schema confirmed 2026-10-22 from VTEX's own published OpenAPI
+  // file (github.com/vtex/openapi-schemas, "VTEX - Catalog API Seller
+  // Portal.json"), after two rounds of live 400s correcting an earlier
+  // guessed flat shape. Required: status, name, brandId, categoryIds
+  // (array), specs/attributes/images (arrays, empty is fine), slug, skus
+  // (array — this creates the product AND its first SKU in one call, no
+  // separate SKU-create endpoint exists in this API family), origin.
+  // Builder lives in sellerProductsHandler.ts's saveSellerPriceInventory.
   public async createProduct(payload: any, userToken?: string): Promise<any> {
     return this.http.post('/api/catalog-seller-portal/products', payload, { headers: this.userHeaders(userToken) })
   }
