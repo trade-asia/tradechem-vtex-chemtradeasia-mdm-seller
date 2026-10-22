@@ -10,12 +10,19 @@ const parseResponse = async (res) => {
   }
 }
 
-// First save: creates the product+SKU in the seller's OWN VTEX account
-// (Basic info/Logistics/SKU Information tabs), then sets price/inventory —
-// matching the native Seller Portal "Create Product" form's own field set.
-// Once linked (sellerPid/sellerSid recorded in MDM's metadata), those
-// creation tabs lock and only Price/Inventory stay editable — re-running
-// creation isn't meaningful once the product already exists.
+// First save: creates the product+SKU in the seller's OWN marketplace
+// catalog (Basic info/Logistics/SKU Information tabs), then sets
+// price/inventory — matching the native Seller Portal "Create Product"
+// form's own field set. Once linked (sellerPid/sellerSid recorded in MDM's
+// metadata), those creation tabs lock and only Price/Inventory stay
+// editable — re-running creation isn't meaningful once the product
+// already exists.
+//
+// "Linked" here is entirely about sellerPid/sellerSid — this seller's own
+// catalog, independent of and unrelated to p.vtex?.linked/vtex_product_id
+// elsewhere in this app (whether admin has imported/linked the MDM product
+// into the marketplace's own catalog). Don't conflate the two: this modal
+// never reads or depends on that other link status at all.
 const TABS_CREATE = ['Basic Information', 'Operations & Logistics', 'SKU Information', 'Inventory', 'Price']
 const TABS_LINKED = ['Inventory', 'Price']
 
@@ -28,6 +35,12 @@ const PriceInventoryModal = ({ product, onClose }) => {
   const [saved, setSaved] = useState(false)
 
   const [linked, setLinked] = useState(false)
+  // Set once, only from the initial load — never touched by a save in this
+  // session. Drives whether the "this already exists" banner shows at all:
+  // `linked` alone also flips true right after a fresh creation succeeds,
+  // which made that banner claim something existed before the admin had
+  // even touched it (confirmed by the client: misleading on first save).
+  const [wasLinkedOnLoad, setWasLinkedOnLoad] = useState(false)
   const [sellerPid, setSellerPid] = useState(null)
   const [sellerSid, setSellerSid] = useState(null)
   const [brands, setBrands] = useState([])
@@ -70,6 +83,7 @@ const PriceInventoryModal = ({ product, onClose }) => {
         setWarehouses(data.warehouses ?? [])
         if (data.linked) {
           setLinked(true)
+          setWasLinkedOnLoad(true)
           setSellerPid(data.sellerPid)
           setSellerSid(data.sellerSid)
           setActiveTab(TABS_LINKED[0])
@@ -170,7 +184,7 @@ const PriceInventoryModal = ({ product, onClose }) => {
           <Alert type="error">{loadError}</Alert>
         ) : (
           <>
-            {linked && (
+            {wasLinkedOnLoad && (
               <div style={{ marginBottom: 16 }}>
                 <Alert type="success">
                   This product already exists in your marketplace catalog (Product ID {sellerPid}, SKU ID {sellerSid}). Only price and inventory can be changed here now.
@@ -179,7 +193,11 @@ const PriceInventoryModal = ({ product, onClose }) => {
             )}
             {saved && (
               <div style={{ marginBottom: 16 }}>
-                <Alert type="success" onClose={() => setSaved(false)}>Saved successfully.</Alert>
+                <Alert type="success" onClose={() => setSaved(false)}>
+                  {wasLinkedOnLoad
+                    ? 'Saved successfully.'
+                    : `Product created in your marketplace catalog (Product ID ${sellerPid}, SKU ID ${sellerSid}). From now on, only price and inventory can be changed here.`}
+                </Alert>
               </div>
             )}
             {saveError && (

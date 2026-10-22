@@ -411,6 +411,13 @@ function extractSellerIds(res: any): { sellerPid?: string; sellerSid?: string } 
 // product later gets linked, and they've flagged mdm_product_id as the
 // identifier they may standardize on long-term, so this is also the
 // forward-compatible choice — see MdmClient.ts's own note.
+//
+// sellerPid/sellerSid are this SELLER's own independent catalog ids —
+// unrelated to and never validated against vtex_product_id/vtex.linked
+// (whether admin has imported/linked the MDM product into the
+// marketplace's own catalog, used elsewhere in this handler for
+// Export/live-status). The two linking relationships are intentionally
+// kept separate; this endpoint never checks the other one.
 interface PriceInventoryRecord {
   sellerPid: string
   sellerSid: string
