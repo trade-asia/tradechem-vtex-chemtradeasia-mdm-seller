@@ -41,7 +41,19 @@ export async function syncSellerNow(
     })
     const mdmSellerId = data?.id
     if (mdmSellerId) {
-      await ctx.clients.vbase.saveJSON(SELLER_SYNC_BUCKET, SELLER_SYNC_KEY, { mdmSellerId, syncedAt: new Date().toISOString() })
+      // Whatever name/logo MDM's own sync response happens to carry (see
+      // this function's header comment — names are meant to arrive here via
+      // the marketplace app's bulk sync-all-sellers, not anything we send
+      // ourselves) — cached alongside mdmSellerId so touch-login can read it
+      // back without a second call. Still just a best-confidence guess at
+      // field names; "Not defined" on the My Products banner if none of
+      // these come back populated is the correct, honest outcome.
+      const fullName = [data?.first_name, data?.last_name].filter(Boolean).join(' ')
+      const name = data?.name ?? data?.company_name ?? data?.companyName ?? (fullName || undefined)
+      const logoUrl = data?.logo ?? data?.logo_url ?? data?.logoUrl ?? data?.picture ?? data?.avatar_url ?? undefined
+      await ctx.clients.vbase.saveJSON(SELLER_SYNC_BUCKET, SELLER_SYNC_KEY, {
+        mdmSellerId, name, logoUrl, syncedAt: new Date().toISOString(),
+      })
       return mdmSellerId
     }
   } catch {}
@@ -68,4 +80,13 @@ export async function ensureSellerSynced(
   if (isFresh) return cached!.mdmSellerId
 
   return syncSellerNow(ctx, mdmToken, userToken)
+}
+
+// Reads back whatever syncSellerNow last cached — used by touch-login to
+// show name/logo on the My Products banner without a second MDM round trip
+// (the force-sync it already does is what populated this).
+export async function getCachedSellerInfo(
+  ctx: { clients: Clients }
+): Promise<{ mdmSellerId?: number; name?: string; logoUrl?: string } | null> {
+  try { return await ctx.clients.vbase.getJSON<any>(SELLER_SYNC_BUCKET, SELLER_SYNC_KEY, true) } catch { return null }
 }

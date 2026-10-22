@@ -238,6 +238,10 @@ export async function listSellerProducts(ctx: ServiceContext<Clients>) {
       sort_by: q.sort_by,
       sort_direction: q.sort_direction,
     }))
+    // List loads immediately with just the cheap `linked` flag — live
+    // Active/Inactive status (what "Published" actually reflects, see
+    // getVtexProductStatusHandler) is fetched per row afterward, from the
+    // frontend, so the list itself is never blocked waiting on VTEX.
     ctx.body = { success: true, ...result }
   } catch (err: any) {
     ctx.body = { success: false, error: 'Failed to load products', detail: mdmErrDetail(err) }

@@ -1,7 +1,7 @@
 import { ServiceContext } from '@vtex/api'
 import { Clients } from '../clients'
 import { getSellerMdmToken } from './devSettingsHandler'
-import { syncSellerNow, decodeEmailFromAdminToken } from '../helpers/sellerSync'
+import { syncSellerNow, decodeEmailFromAdminToken, getCachedSellerInfo } from '../helpers/sellerSync'
 
 // GET /_v/mdm-seller/touch-login — called by the React admin pages once on
 // mount. VTEX gives this app no real "seller logged in" webhook, so an admin
@@ -24,6 +24,20 @@ export async function touchSellerLogin(ctx: ServiceContext<Clients>) {
   }
 
   const mdmSellerId = await syncSellerNow(ctx as any, token, userToken)
+  const cachedSellerInfo = await getCachedSellerInfo(ctx as any)
+
+  // Best-effort, separate from the MDM sync above — a 403 (missing License
+  // Manager permission on this user) or any other failure here shouldn't
+  // block the page or the MDM sync result, it just means the ribbon shows
+  // without company info.
+  let companyName: string | undefined
+  let logoUrl: string | undefined
+  try {
+    const account = await ctx.clients.sellerCatalog.getAccountInfo(userToken)
+    companyName = account?.tradingName || account?.companyName || undefined
+    logoUrl = account?.hasLogo && account?.logo ? account.logo : undefined
+  } catch {}
+
   ctx.body = {
     success: !!mdmSellerId,
     mdmSellerId,
@@ -34,5 +48,15 @@ export async function touchSellerLogin(ctx: ServiceContext<Clients>) {
     vtexAccount: ctx.vtex.account,
     email: decodeEmailFromAdminToken(userToken),
     syncedAt: new Date().toISOString(),
+    // Seller name/logo: whatever MDM's sync response happened to carry
+    // (see sellerSync.ts — unconfirmed field names, "Not defined" on the
+    // frontend if neither of these came back populated).
+    sellerName: cachedSellerInfo?.name,
+    sellerLogoUrl: cachedSellerInfo?.logoUrl,
+    // Company name/logo: VTEX's own account-level Company Information
+    // (License Manager), confirmed schema — distinct from the seller-name
+    // fields above, which come from MDM instead.
+    companyName,
+    logoUrl,
   }
 }

@@ -678,6 +678,11 @@ const SellerProducts = () => {
   const [error, setError] = useState(null)
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
+  // Live Active/Inactive per linked product, keyed by vtex_product_id —
+  // fetched one at a time after the list itself has already rendered, so
+  // the list is never blocked waiting on VTEX (see listSellerProducts's own
+  // comment). undefined = not checked yet, 'loading' = in flight.
+  const [liveStatus, setLiveStatus] = useState({})
 
   const [nameFilter, setNameFilter] = useState('')
   const [skuFilter, setSkuFilter] = useState('')
@@ -771,6 +776,7 @@ const SellerProducts = () => {
       const data = await parseResponse(res)
       if (!data.success) throw new Error(data.detail ? `${data.error}: ${data.detail}` : data.error)
       setProducts(data.products ?? [])
+      setLiveStatus({})
       setTotal(data.total ?? 0)
       setPage(p)
     } catch (err) {
@@ -789,6 +795,35 @@ const SellerProducts = () => {
     }, DEBOUNCE_MS)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nameFilter, skuFilter, casFilter, hsFilter, statusFilter, linkedFilter, sortBy, sortDirection])
+
+  // Fills in each linked product's real Published state one at a time,
+  // after the list has already rendered — the list load itself never waits
+  // on VTEX (see listSellerProducts's own comment); this is what actually
+  // resolves "published" vs "pending" per row, progressively.
+  useEffect(() => {
+    let cancelled = false
+    const toCheck = products.filter(p => p.vtex?.linked && p.vtex?.vtex_product_id && liveStatus[p.vtex.vtex_product_id] === undefined)
+    if (toCheck.length === 0) return
+
+    ;(async () => {
+      for (const p of toCheck) {
+        if (cancelled) return
+        const id = p.vtex.vtex_product_id
+        setLiveStatus(s => ({ ...s, [id]: 'loading' }))
+        try {
+          const res = await fetch(`${BASE}/products/vtex-status?vtexProductId=${encodeURIComponent(id)}`)
+          const data = await parseResponse(res)
+          if (cancelled) return
+          setLiveStatus(s => ({ ...s, [id]: data.success ? !!data.isActive : 'error' }))
+        } catch {
+          if (!cancelled) setLiveStatus(s => ({ ...s, [id]: 'error' }))
+        }
+      }
+    })()
+
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [products])
 
   const handleNextPage = () => {
     fetchParamsRef.current = { page: page + 1 }
@@ -965,14 +1000,34 @@ const SellerProducts = () => {
 
       {sellerInfo && (
         <div style={{
-          display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '4px 16px',
+          display: 'flex', alignItems: 'center', gap: 10,
           fontSize: 12, color: '#475569', background: '#f1f5f9', border: '1px solid #e2e8f0',
-          borderRadius: 4, padding: '6px 12px', margin: '16px 0',
+          borderRadius: 6, padding: '6px 12px', margin: '16px 0',
         }}>
-          <span>Logged in as <strong>{sellerInfo.vtexAccount}</strong></span>
-          {sellerInfo.email && <span>· {sellerInfo.email}</span>}
-          <span>· MDM Seller ID <strong style={{ fontFamily: 'monospace' }}>{sellerInfo.mdmSellerId}</strong></span>
-          <span style={{ color: '#94a3b8' }}>· synced just now</span>
+          {sellerInfo.logoUrl ? (
+            <img
+              src={sellerInfo.logoUrl} alt=""
+              style={{ width: 24, height: 24, borderRadius: 4, objectFit: 'cover', flexShrink: 0 }}
+            />
+          ) : (
+            // Same initial-letter placeholder VTEX's own Company Information
+            // screen uses when no logo is uploaded.
+            <div style={{
+              width: 24, height: 24, borderRadius: 4, background: '#cbd5e1', color: '#475569',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 12, fontWeight: 700, flexShrink: 0,
+            }}>
+              {(sellerInfo.companyName || sellerInfo.vtexAccount || '?').charAt(0).toUpperCase()}
+            </div>
+          )}
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '2px 10px' }}>
+            <strong style={{ color: '#142032' }}>{sellerInfo.companyName || sellerInfo.vtexAccount}</strong>
+            <span>{sellerInfo.vtexAccount}</span>
+            {sellerInfo.email && <span>· {sellerInfo.email}</span>}
+            <span>· Seller: {sellerInfo.sellerName || 'Not defined'}</span>
+            <span>· MDM ID <strong style={{ fontFamily: 'monospace' }}>{sellerInfo.mdmSellerId}</strong></span>
+            <span style={{ color: '#94a3b8' }}>· synced just now</span>
+          </div>
         </div>
       )}
 
@@ -1134,6 +1189,24 @@ const SellerProducts = () => {
             const origin = p.origin_countries?.length
               ? p.origin_countries.map(c => c.name).join(', ')
               : null
+            // Published state resolves progressively — see the liveStatus
+            // effect above. Not checked yet / still in flight both read as
+            // "checking", not "pending", so the badge doesn't flash a wrong
+            // answer before the real one arrives.
+            const rowLiveStatus = p.vtex?.linked ? liveStatus[p.vtex?.vtex_product_id] : undefined
+            const isChecking = p.vtex?.linked && (rowLiveStatus === undefined || rowLiveStatus === 'loading')
+            const isPublished = p.vtex?.linked && rowLiveStatus === true
+            // Edit/Revert to Pending default to hidden while the live check
+            // is still in flight, so they never flash on then immediately
+            // disappear once the real state comes back. Once resolved:
+            // active + published = nothing to do via MDM, both stay hidden;
+            // anything else, Edit reappears, and Revert to Pending reappears
+            // too but only for an active (not yet published) product —
+            // rejected/pending/draft show Edit the same way, just never
+            // Revert to Pending (that's only ever meaningful from active).
+            const fullyLive = p.status === 'active' && isPublished
+            const showEdit = !isChecking && !fullyLive
+            const showRevert = !isChecking && p.status === 'active' && !isPublished
             return (
             <div
               key={p.id ?? idx}
@@ -1182,19 +1255,24 @@ const SellerProducts = () => {
                       </button>
                     </>
                   )}
-                  <button
-                    onClick={() => handleEditClick(p)}
-                    disabled={editLoadingId === p.id}
-                    title="Edit this product"
-                    style={{
-                      background: '#fff', border: '1px solid #3f7bbf', borderRadius: 4, padding: '3px 10px',
-                      fontSize: 11, fontWeight: 600, color: '#3f7bbf',
-                      cursor: editLoadingId === p.id ? 'not-allowed' : 'pointer',
-                      opacity: editLoadingId === p.id ? 0.6 : 1,
-                    }}
-                  >
-                    {editLoadingId === p.id ? '…' : 'Edit'}
-                  </button>
+                  {/* Once a product is active AND published on the marketplace,
+                      editing/reverting through MDM no longer applies — the
+                      marketplace now owns the live listing. */}
+                  {showEdit && (
+                    <button
+                      onClick={() => handleEditClick(p)}
+                      disabled={editLoadingId === p.id}
+                      title="Edit this product"
+                      style={{
+                        background: '#fff', border: '1px solid #3f7bbf', borderRadius: 4, padding: '3px 10px',
+                        fontSize: 11, fontWeight: 600, color: '#3f7bbf',
+                        cursor: editLoadingId === p.id ? 'not-allowed' : 'pointer',
+                        opacity: editLoadingId === p.id ? 0.6 : 1,
+                      }}
+                    >
+                      {editLoadingId === p.id ? '…' : 'Edit'}
+                    </button>
+                  )}
                   <button
                     onClick={() => setPriceInventoryProduct(p)}
                     title="Manage this product's price and inventory in your own VTEX catalog — available before marketplace approval too."
@@ -1216,7 +1294,7 @@ const SellerProducts = () => {
                       View rejection reason
                     </button>
                   )}
-                  {p.status === 'active' && (
+                  {showRevert && (
                     <button
                       onClick={() => handleRevertClick(p)}
                       title="Revert to Pending Approval"
@@ -1251,9 +1329,17 @@ const SellerProducts = () => {
                 )}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', paddingTop: 2 }}>
-                <Tag bgColor={p.vtex?.linked ? '#8BC34A' : '#9E9E9E'} color="#fff">
-                  {p.vtex?.linked ? 'published' : 'pending'}
-                </Tag>
+                {/* Live-checked per row, progressively (not just "linked")
+                    — confirmed live 2026-10-22: a linked product can still
+                    be Inactive in VTEX, so "published" only shows once
+                    that's actually confirmed. */}
+                {isChecking ? (
+                  <Tag bgColor="#e2e8f0" color="#64748b">checking…</Tag>
+                ) : (
+                  <Tag bgColor={isPublished ? '#8BC34A' : '#9E9E9E'} color="#fff">
+                    {isPublished ? 'published' : 'pending'}
+                  </Tag>
+                )}
               </div>
               <div style={{ fontSize: 12, color: '#666', paddingTop: 2, fontFamily: 'monospace' }}>
                 {p.vtex?.linked

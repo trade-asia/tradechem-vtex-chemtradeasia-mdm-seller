@@ -29,6 +29,20 @@ export class SellerCatalogClient extends ExternalClient {
     return this.http.get(`/api/catalog-seller-portal/products/${productId}`, { headers: this.userHeaders(userToken) })
   }
 
+  // License Manager's "Get information about account" — confirmed live
+  // schema from VTEX's own OpenAPI file (github.com/vtex/openapi-schemas,
+  // "VTEX - License Manager API.json"), unlike the Seller Portal Catalog
+  // API elsewhere in this file: { tradingName, companyName, logo, hasLogo,
+  // accountName, telephone, cnpj, ... }. Backs the My Products page's
+  // company-info ribbon. Per VTEX's docs this needs the "Save account"
+  // License Manager resource on whoever's token calls it — the account
+  // owner has this by default, but a restricted-role user might not; a
+  // 403 here should fail soft (ribbon just omits company info) rather
+  // than blocking the page.
+  public async getAccountInfo(userToken?: string): Promise<any> {
+    return this.http.get('/api/vlm/account', { headers: this.userHeaders(userToken) })
+  }
+
   // Beta API, unconfirmed response shape (see createProduct's own note) —
   // tries every plausible wrapper rather than assuming one, and hands the
   // raw response back alongside whatever got parsed so the handler can
