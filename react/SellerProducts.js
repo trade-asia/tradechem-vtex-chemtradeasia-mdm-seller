@@ -1164,7 +1164,7 @@ const SellerProducts = () => {
           color: '#6b7c93', letterSpacing: '0.6px', textTransform: 'uppercase',
         }}>
           <div>Product</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
             MDM Status
             <InfoDot tooltip="MDM's own internal workflow status for this product." />
           </div>
@@ -1172,7 +1172,7 @@ const SellerProducts = () => {
             Published
             <InfoDot tooltip="Whether this product is published and live on the marketplace in VTEX." />
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
             PID / SID
             <InfoDot tooltip="Once your product is published, the marketplace gives it a new Product ID (PID) and SKU ID (SID) of its own." />
           </div>
@@ -1308,7 +1308,7 @@ const SellerProducts = () => {
                   )}
                 </div>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingTop: 2 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, paddingTop: 2 }}>
                 <span onClick={() => handleStatusClick(p)} style={{ cursor: 'pointer' }} title="Click to check live MDM + VTEX status">
                   <Tag bgColor={STATUS_COLORS[p.status] ?? '#9E9E9E'} color="#fff">{p.status}</Tag>
                 </span>
@@ -1341,7 +1341,7 @@ const SellerProducts = () => {
                   </Tag>
                 )}
               </div>
-              <div style={{ fontSize: 12, color: '#666', paddingTop: 2, fontFamily: 'monospace' }}>
+              <div style={{ fontSize: 12, color: '#666', paddingTop: 2, fontFamily: 'monospace', textAlign: 'center' }}>
                 {p.vtex?.linked
                   // SID shows "-" until MDM's own GET /vtex/products starts
                   // returning vtex_sku_id on read (their write side already

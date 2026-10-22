@@ -58,11 +58,13 @@ export class SellerCatalogClient extends ExternalClient {
 
   // Confirmed live 2026-10-22 from VTEX's published schema: { data: [{id,
   // name, isActive, ...}], _metadata: {total, from, to, ...} } — paginated
-  // by `from`/`to`, defaulting to only the first ~10 if omitted. 500 is
-  // comfortably past what a single seller's own brand list should ever
-  // need; revisit with real pagination if that stops being true.
+  // by `from`/`to`, defaulting to only the first ~10 if omitted. Also
+  // confirmed live: VTEX caps this at 100 entries per request ("Response
+  // size can't have more than 100 entries") — a 500 request 400s outright,
+  // so this is maxed at the real ceiling, not a margin below it. A seller
+  // with over 100 brands would need real pagination here; not the case yet.
   public async listBrands(userToken?: string): Promise<{ items: any[]; raw: any }> {
-    const res: any = await this.http.get('/api/catalog-seller-portal/brands?from=1&to=500', { headers: this.userHeaders(userToken) })
+    const res: any = await this.http.get('/api/catalog-seller-portal/brands?from=1&to=100', { headers: this.userHeaders(userToken) })
     return { items: this.extractList(res, ['data', 'items', 'Items', 'brands', 'Brands', 'result']), raw: res }
   }
 

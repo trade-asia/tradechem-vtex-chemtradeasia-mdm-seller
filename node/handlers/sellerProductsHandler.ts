@@ -403,19 +403,14 @@ function extractSellerIds(res: any): { sellerPid?: string; sellerSid?: string } 
   }
 }
 
-// Durable link record (sellerPid/sellerSid + last-saved price/inventory).
-// Written to BOTH places on every save: VBase (keyed by mdmProductId —
-// always available, unlike vtex_product_id, which doesn't exist until
-// admin links the product — confirmed 2026-10-22 this has to work
-// pre-approval too) and MDM's metadata endpoint (keyed by vtex_product_id,
-// MDM's own design, nothing to do with VTEX itself) whenever that key is
-// actually available. Once a vtex_product_id exists, MDM's metadata is the
-// one this always reads back from (2026-10-22, explicit instruction) — so
-// our modal and MDM's own admin panel never show different data from each
-// other. VBase only remains the read source for the window before a
-// product is linked, when metadata literally can't be keyed at all.
-const PRICE_INVENTORY_BUCKET = 'mdm-price-inv'
-
+// Durable link record (sellerPid/sellerSid + last-saved price/inventory),
+// stored entirely in MDM's metadata endpoint now — keyed by mdm_product_id
+// (always available, linked or not), per MDM's 2026-10-22 follow-up adding
+// that route specifically for this. No VBase fallback needed anymore: MDM
+// confirmed metadata pushed pre-link carries over automatically once a
+// product later gets linked, and they've flagged mdm_product_id as the
+// identifier they may standardize on long-term, so this is also the
+// forward-compatible choice — see MdmClient.ts's own note.
 interface PriceInventoryRecord {
   sellerPid: string
   sellerSid: string
@@ -427,7 +422,7 @@ interface PriceInventoryRecord {
   updatedAt: string
 }
 
-// GET /_v/mdm-seller/products/price-inventory?mdmProductId=&vtexProductId=
+// GET /_v/mdm-seller/products/price-inventory?mdmProductId=
 // Backs the Price & Inventory modal — which is really "create this product
 // in the seller's own VTEX account, then manage its price/inventory
 // natively" (2026-10-22, the client's explicit request; the marketplace's
@@ -435,18 +430,15 @@ interface PriceInventoryRecord {
 // available even before the product is linked/approved — it's the
 // seller's own catalog either way).
 //
-// On every open: if vtexProductId is known, reads MDM's metadata first
-// (the authoritative copy once it exists); otherwise, or if metadata has
-// nothing yet, falls back to our own VBase record. Either way, if a
-// sellerPid is found, confirms with a live call that VTEX still has that
-// product rather than trusting a possibly-stale record. Confirmed:
+// On every open: reads MDM's metadata (the authoritative record). If a
+// sellerPid is found there, confirms with a live call that VTEX still has
+// that product rather than trusting a possibly-stale record. Confirmed:
 // creation fields (name/brand/category/dimensions) are locked and only
 // Price/Inventory stay editable. Not confirmed (never created, or VTEX no
 // longer has it): the full creation form is shown instead.
 export async function getSellerPriceInventory(ctx: ServiceContext<Clients>) {
   ctx.status = 200
   const mdmProductId = (ctx.query as any).mdmProductId as string | undefined
-  const vtexProductId = (ctx.query as any).vtexProductId as string | undefined
   if (!mdmProductId) {
     ctx.body = { success: false, error: 'mdmProductId is required' }
     return
@@ -457,16 +449,11 @@ export async function getSellerPriceInventory(ctx: ServiceContext<Clients>) {
   const userToken = (ctx.vtex as any)?.adminUserAuthToken
 
   let saved: PriceInventoryRecord | null = null
-  if (vtexProductId) {
-    try {
-      const metadata = await withAuthRetry(ctx, auth, a => ctx.clients.mdm.getProductMetadata(a.token, vtexProductId))
-      if (metadata?.vtexPriceInventory?.sellerPid) saved = metadata.vtexPriceInventory
-    } catch {
-      // Falls through to VBase below.
-    }
-  }
-  if (!saved) {
-    saved = await ctx.clients.vbase.getJSON<PriceInventoryRecord>(PRICE_INVENTORY_BUCKET, mdmProductId, true)
+  try {
+    const metadata = await withAuthRetry(ctx, auth, a => ctx.clients.mdm.getProductMetadata(a.token, mdmProductId))
+    if (metadata?.vtexPriceInventory?.sellerPid) saved = metadata.vtexPriceInventory
+  } catch {
+    // Falls through to the not-linked/creation path below.
   }
 
   if (saved?.sellerPid) {
@@ -555,21 +542,19 @@ export async function getSellerPriceInventory(ctx: ServiceContext<Clients>) {
 }
 
 // POST /_v/mdm-seller/products/price-inventory
-// Body (first save): { mdmProductId, vtexProductId?, name, refId, brandId,
-//   categoryId, taxCode?, ean?, packageWeight, packageWidth, packageHeight,
+// Body (first save): { mdmProductId, name, refId, brandId, categoryId,
+//   taxCode?, ean?, packageWeight, packageWidth, packageHeight,
 //   packageLength, price, listPrice?, warehouseId, quantity,
 //   unlimitedQuantity }
 // Body (already linked — sellerPid/sellerSid present): only price/
 //   inventory fields are read; creation is skipped entirely.
-// vtexProductId is optional — absent for a product admin hasn't
-// approved/linked yet, in which case the MDM metadata mirror below is
-// simply skipped; VBase (keyed by mdmProductId) is what actually matters.
 //
 // Creates the product+SKU in the seller's OWN VTEX account (their live
 // session token — see SellerCatalogClient's own note on why this can't run
 // as a background job), sets price/inventory on it, then saves
-// sellerPid/sellerSid + the saved values to VBase (our own durable record)
-// and, best-effort, mirrors them into MDM's metadata too when possible.
+// sellerPid/sellerSid + the saved values to MDM's metadata (mdm_product_id-
+// keyed — see getProductMetadata's own note on why that's always the one
+// used here, not vtex_product_id).
 export async function saveSellerPriceInventory(ctx: ServiceContext<Clients>) {
   ctx.status = 200
   const raw = await readBody(ctx)
@@ -577,7 +562,7 @@ export async function saveSellerPriceInventory(ctx: ServiceContext<Clients>) {
   try { parsed = JSON.parse(raw) } catch {}
 
   const {
-    mdmProductId, vtexProductId, name, refId, brandId, categoryId, taxCode, ean,
+    mdmProductId, name, refId, brandId, categoryId, taxCode, ean,
     packageWeight, packageWidth, packageHeight, packageLength,
     price, listPrice, warehouseId, quantity, unlimitedQuantity,
     sellerPid, sellerSid,
@@ -686,22 +671,17 @@ export async function saveSellerPriceInventory(ctx: ServiceContext<Clients>) {
     updatedAt: new Date().toISOString(),
   }
 
-  // VBase always — our own durable copy, and the only thing available at
-  // all before the product is linked. MDM's metadata, best-effort, only
-  // when vtexProductId is actually known; a failure here never fails the
-  // save itself (the VTEX writes above already succeeded and are what
-  // actually matters), it just means MDM's admin panel won't show the
-  // latest values until the next successful sync.
-  await ctx.clients.vbase.saveJSON(PRICE_INVENTORY_BUCKET, mdmProductId, record)
-
+  // A failure here never fails the save itself (the VTEX writes above
+  // already succeeded and are what actually matters) — it just means the
+  // next modal open won't find this record and will offer to create the
+  // product again, so it's worth retrying rather than swallowing silently,
+  // but shouldn't block reporting success on the part that counts.
   let metadataError: string | undefined
-  if (vtexProductId) {
-    try {
-      const current = (await withAuthRetry(ctx, auth, a => ctx.clients.mdm.getProductMetadata(a.token, vtexProductId))) ?? {}
-      await withAuthRetry(ctx, auth, a => ctx.clients.mdm.setProductMetadata(a.token, vtexProductId, { ...current, vtexPriceInventory: record }))
-    } catch (err: any) {
-      metadataError = mdmErrDetail(err)
-    }
+  try {
+    const current = (await withAuthRetry(ctx, auth, a => ctx.clients.mdm.getProductMetadata(a.token, mdmProductId))) ?? {}
+    await withAuthRetry(ctx, auth, a => ctx.clients.mdm.setProductMetadata(a.token, mdmProductId, { ...current, vtexPriceInventory: record }))
+  } catch (err: any) {
+    metadataError = mdmErrDetail(err)
   }
 
   ctx.body = { success: true, sellerPid: newSellerPid, sellerSid: newSellerSid, metadataError }

@@ -227,12 +227,23 @@ export class MdmClient extends ExternalClient {
   // Metadata tab with a last-synced timestamp. POST REPLACES the whole
   // object rather than merging, so every write here has to send the full
   // current contents back, not just the changed keys — see
-  // sellerProductsHandler.ts's savePriceInventory for the read-modify-write
-  // this requires. 404 on GET means nothing's been pushed yet.
-  public async getProductMetadata(token: string, vtexProductId: string): Promise<Record<string, any> | null> {
+  // sellerProductsHandler.ts's saveSellerPriceInventory for the
+  // read-modify-write this requires. 404 on GET means nothing's been
+  // pushed yet.
+  //
+  // Keyed by mdm_product_id (MDM's own internal id), not vtex_product_id —
+  // MDM added a parallel vtex_product_id-keyed pair too (2026-10-22,
+  // mirroring their existing media endpoint split), but we deliberately
+  // only use the mdm_product_id route here: it's always available
+  // (linked or not, unlike vtex_product_id), MDM confirmed metadata pushed
+  // this way carries over automatically once a product later gets linked
+  // (no migration needed on our end), and MDM has flagged they may
+  // eventually standardize on mdm_product_id only — so this is also the
+  // forward-compatible choice, not just the simpler one.
+  public async getProductMetadata(token: string, mdmProductId: string | number): Promise<Record<string, any> | null> {
     try {
       const res: any = await this.http.get(
-        this.url(`/vtex/products/${vtexProductId}/metadata`),
+        this.url(`/vtex/mdm-products/${mdmProductId}/metadata`),
         { headers: { Authorization: `Bearer ${token}` } }
       )
       return res?.data?.data ?? res?.data ?? null
@@ -242,9 +253,9 @@ export class MdmClient extends ExternalClient {
     }
   }
 
-  public async setProductMetadata(token: string, vtexProductId: string, data: Record<string, any>): Promise<any> {
+  public async setProductMetadata(token: string, mdmProductId: string | number, data: Record<string, any>): Promise<any> {
     const res: any = await this.http.post(
-      this.url(`/vtex/products/${vtexProductId}/metadata`),
+      this.url(`/vtex/mdm-products/${mdmProductId}/metadata`),
       { data },
       { headers: { Authorization: `Bearer ${token}` } }
     )

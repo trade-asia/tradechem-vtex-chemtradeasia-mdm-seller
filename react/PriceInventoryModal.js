@@ -62,7 +62,6 @@ const PriceInventoryModal = ({ product, onClose }) => {
     setLoading(true)
     setLoadError(null)
     const params = new URLSearchParams({ mdmProductId: product.id })
-    if (product.vtex?.vtex_product_id) params.set('vtexProductId', product.vtex.vtex_product_id)
     fetch(`${BASE}/products/price-inventory?${params.toString()}`)
       .then(parseResponse)
       .then(data => {
@@ -114,7 +113,6 @@ const PriceInventoryModal = ({ product, onClose }) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           mdmProductId: product.id,
-          vtexProductId: product.vtex?.vtex_product_id || undefined,
           sellerPid: linked ? sellerPid : undefined,
           sellerSid: linked ? sellerSid : undefined,
           name: product.name,
