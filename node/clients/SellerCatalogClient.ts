@@ -91,6 +91,31 @@ export class SellerCatalogClient extends ExternalClient {
     return this.http.post('/api/catalog-seller-portal/products', payload, { headers: this.userHeaders(userToken) })
   }
 
+  // Classic Catalog API, not the Seller Portal one — confirmed from VTEX's
+  // published schema (github.com/vtex/openapi-schemas, "VTEX - Catalog
+  // API.json") that this accepts a plain external image URL directly
+  // (VTEX fetches it server-side), unlike the Seller Portal product-create
+  // payload's `images` field, which demands an already-vtexassets.com-
+  // hosted URL. Same endpoint/shape the marketplace app's own
+  // attachSkuImage already uses successfully. Not yet confirmed live
+  // whether this classic endpoint works against a SKU created via the
+  // newer Seller Portal API — different API family, never tested together
+  // before this — so treat this as best-confidence pending the first
+  // real attempt, same as everything else new in this file.
+  public async attachSkuImage(
+    skuId: number,
+    url: string,
+    name: string,
+    isMain: boolean,
+    userToken?: string
+  ): Promise<any> {
+    return this.http.post(
+      `/api/catalog/pvt/stockkeepingunit/${skuId}/file`,
+      { Name: name, Url: url, IsMain: isMain },
+      { headers: this.userHeaders(userToken) }
+    )
+  }
+
   public async listWarehouses(userToken?: string): Promise<any[]> {
     const res: any = await this.http.get('/api/logistics/pvt/configuration/warehouses', { headers: this.userHeaders(userToken) })
     return Array.isArray(res) ? res : []

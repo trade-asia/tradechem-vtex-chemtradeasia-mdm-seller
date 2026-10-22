@@ -587,6 +587,7 @@ export async function saveSellerPriceInventory(ctx: ServiceContext<Clients>) {
 
   let newSellerPid = sellerPid ? String(sellerPid) : undefined
   let newSellerSid = sellerSid ? String(sellerSid) : undefined
+  let mediaError: string | undefined
 
   if (!newSellerPid || !newSellerSid) {
     if (!name || !brandId || !categoryId || !(Number(packageWeight) > 0) || !(Number(packageWidth) > 0) || !(Number(packageHeight) > 0) || !(Number(packageLength) > 0)) {
@@ -650,6 +651,32 @@ export async function saveSellerPriceInventory(ctx: ServiceContext<Clients>) {
       ctx.body = { success: false, error: "VTEX rejected creating this product in your catalog", detail: vtexErrDetail(err) }
       return
     }
+
+    // Best-effort — attach the product's current MDM media to the newly
+    // created SKU, right in this same Save action (per the client's
+    // explicit direction 2026-10-23: Save attaches media, not a separate
+    // step; the Media tab's own Sync button only ever refreshes what's
+    // shown there, never attaches anything itself). Only runs here, on a
+    // fresh creation — once linked, the Media tab disappears from the
+    // modal entirely like the other creation-only tabs, by design, so
+    // there's no later re-attach path. Re-fetches MDM media live rather
+    // than trusting whatever the modal last displayed, so this reflects
+    // whatever the seller most recently synced/edited, not stale state.
+    // A failure here never fails the save itself — the product/SKU already
+    // exist and that's what matters most.
+    try {
+      const mediaItems = await withAuthRetry(ctx, auth, a => ctx.clients.mdm.getProductMediaByMdmId(a.token, mdmProductId, a.vtexSellerId))
+      for (const item of mediaItems) {
+        if (!item?.url) continue
+        try {
+          await ctx.clients.sellerCatalog.attachSkuImage(Number(newSellerSid), item.url, item.alt || name, !!item.is_main, userToken)
+        } catch (err: any) {
+          mediaError = vtexErrDetail(err)
+        }
+      }
+    } catch (err: any) {
+      mediaError = mdmErrDetail(err)
+    }
   }
 
   const skuId = Number(newSellerSid)
@@ -691,7 +718,7 @@ export async function saveSellerPriceInventory(ctx: ServiceContext<Clients>) {
     metadataError = mdmErrDetail(err)
   }
 
-  ctx.body = { success: true, sellerPid: newSellerPid, sellerSid: newSellerSid, metadataError }
+  ctx.body = { success: true, sellerPid: newSellerPid, sellerSid: newSellerSid, metadataError, mediaError }
 }
 
 // POST /_v/mdm-seller/products/unpublish?mdmProductId=... — flips an Active

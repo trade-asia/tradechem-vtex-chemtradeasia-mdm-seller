@@ -1295,16 +1295,19 @@ const SellerProducts = () => {
                     </button>
                   )}
                   {showRevert && (
-                    <button
-                      onClick={() => handleRevertClick(p)}
-                      title="Revert to Pending Approval"
-                      style={{
-                        background: '#fff', border: '1px solid #b45309', borderRadius: 4, padding: '3px 10px',
-                        fontSize: 11, fontWeight: 600, color: '#b45309', cursor: 'pointer',
-                      }}
-                    >
-                      Revert to Pending
-                    </button>
+                    <>
+                      <button
+                        onClick={() => handleRevertClick(p)}
+                        title="Revert to Pending Approval"
+                        style={{
+                          background: '#fff', border: '1px solid #b45309', borderRadius: 4, padding: '3px 10px',
+                          fontSize: 11, fontWeight: 600, color: '#b45309', cursor: 'pointer',
+                        }}
+                      >
+                        Revert to Pending
+                      </button>
+                      <InfoDot tooltip="Internal product status." />
+                    </>
                   )}
                 </div>
               </div>

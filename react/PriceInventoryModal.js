@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import ReactDOM from 'react-dom'
 import { Modal, Button, Input, Dropdown, Spinner, Alert } from 'vtex.styleguide'
 
 const BASE = '/_v/mdm-seller'
@@ -23,7 +24,7 @@ const parseResponse = async (res) => {
 // elsewhere in this app (whether admin has imported/linked the MDM product
 // into the marketplace's own catalog). Don't conflate the two: this modal
 // never reads or depends on that other link status at all.
-const TABS_CREATE = ['Basic Information', 'Operations & Logistics', 'SKU Information', 'Inventory', 'Price']
+const TABS_CREATE = ['Basic Information', 'Operations & Logistics', 'SKU Information', 'Media', 'Inventory', 'Price']
 const TABS_LINKED = ['Inventory', 'Price']
 
 const PriceInventoryModal = ({ product, onClose }) => {
@@ -33,6 +34,7 @@ const PriceInventoryModal = ({ product, onClose }) => {
   const [saveError, setSaveError] = useState(null)
   const [saveErrorDetail, setSaveErrorDetail] = useState(null)
   const [saved, setSaved] = useState(false)
+  const [saveWarning, setSaveWarning] = useState(null)
 
   const [linked, setLinked] = useState(false)
   // Set once, only from the initial load — never touched by a save in this
@@ -48,6 +50,16 @@ const PriceInventoryModal = ({ product, onClose }) => {
   const [warehouses, setWarehouses] = useState([])
   const [brandsDebug, setBrandsDebug] = useState(null)
   const [categoriesDebug, setCategoriesDebug] = useState(null)
+
+  // Preview only — Save is what actually attaches this media to the new
+  // SKU (server re-fetches MDM media live at that point, not whatever's
+  // cached here). Sync only ever refreshes this list for the seller to
+  // look at before deciding to save; it never attaches anything itself.
+  const [mediaItems, setMediaItems] = useState([])
+  const [mediaLoading, setMediaLoading] = useState(false)
+  const [mediaError, setMediaError] = useState(null)
+  const [lightboxUrl, setLightboxUrl] = useState(null)
+  const [editLinkLoading, setEditLinkLoading] = useState(false)
 
   const [activeTab, setActiveTab] = useState('')
 
@@ -94,6 +106,7 @@ const PriceInventoryModal = ({ product, onClose }) => {
           setBrandsDebug(data.brandsDebug ?? null)
           setCategoriesDebug(data.categoriesDebug ?? null)
           setActiveTab(TABS_CREATE[0])
+          fetchMedia()
         }
         setPrice(data.price ? String(data.price) : '')
         setListPrice(data.listPrice ? String(data.listPrice) : '')
@@ -104,7 +117,40 @@ const PriceInventoryModal = ({ product, onClose }) => {
       .catch(err => !cancelled && setLoadError(err.message))
       .finally(() => !cancelled && setLoading(false))
     return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [product])
+
+  // Preview-only list of MDM's current media for this product — shown in
+  // the Media tab, which only exists pre-creation (see TABS_LINKED above).
+  // Re-run by the Sync button to pull in anything changed via the Edit
+  // link; Save independently re-fetches this live at attach time rather
+  // than trusting this cached list.
+  const fetchMedia = () => {
+    setMediaLoading(true)
+    setMediaError(null)
+    fetch(`${BASE}/products/media?mdmProductId=${encodeURIComponent(product.id)}`)
+      .then(parseResponse)
+      .then(data => {
+        if (!data.success) { setMediaError(data.detail ? `${data.error}: ${data.detail}` : data.error); return }
+        setMediaItems(data.media ?? [])
+      })
+      .catch(err => setMediaError(err.message))
+      .finally(() => setMediaLoading(false))
+  }
+
+  const handleEditClick = async () => {
+    setEditLinkLoading(true)
+    try {
+      const res = await fetch(`${BASE}/products/edit-link?mdmProductId=${encodeURIComponent(product.id)}`, { method: 'POST' })
+      const data = await parseResponse(res)
+      if (!data.success) throw new Error(data.detail ? `${data.error}: ${data.detail}` : data.error)
+      window.open(data.url, '_blank')
+    } catch (err) {
+      setMediaError(err.message)
+    } finally {
+      setEditLinkLoading(false)
+    }
+  }
 
   const tabs = linked ? TABS_LINKED : TABS_CREATE
 
@@ -165,6 +211,10 @@ const PriceInventoryModal = ({ product, onClose }) => {
       setSellerPid(data.sellerPid)
       setSellerSid(data.sellerSid)
       setSaved(true)
+      // Soft, non-blocking — the product/price/inventory already succeeded,
+      // which is what actually matters; this just tells the seller if the
+      // media attach or the MDM record-keeping sync didn't fully go through.
+      setSaveWarning([data.mediaError && `Media: ${data.mediaError}`, data.metadataError && `Record-keeping: ${data.metadataError}`].filter(Boolean).join(' · ') || null)
     } catch (err) {
       setSaveError(err.message)
     } finally {
@@ -198,6 +248,11 @@ const PriceInventoryModal = ({ product, onClose }) => {
                     ? 'Saved successfully.'
                     : `Product created in your marketplace catalog (Product ID ${sellerPid}, SKU ID ${sellerSid}). From now on, only price and inventory can be changed here.`}
                 </Alert>
+              </div>
+            )}
+            {saveWarning && (
+              <div style={{ marginBottom: 16 }}>
+                <Alert type="warning" onClose={() => setSaveWarning(null)}>{saveWarning}</Alert>
               </div>
             )}
             {saveError && (
@@ -279,6 +334,40 @@ const PriceInventoryModal = ({ product, onClose }) => {
               </div>
             )}
 
+            {activeTab === 'Media' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div style={{ fontSize: 12, color: '#666' }}>
+                  These are the pictures currently on this product in MDM — they'll be attached to it here when you Save. This media will also be attached to the product on the marketplace once it's approved.
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <Button variation="secondary" size="small" onClick={handleEditClick} isLoading={editLinkLoading}>
+                    Edit — you can change media on this product
+                  </Button>
+                  <Button variation="secondary" size="small" onClick={fetchMedia} isLoading={mediaLoading}>
+                    Sync
+                  </Button>
+                </div>
+                {mediaError && <Alert type="error" onClose={() => setMediaError(null)}>{mediaError}</Alert>}
+                {mediaLoading ? (
+                  <div style={{ display: 'flex', justifyContent: 'center', padding: 16 }}><Spinner /></div>
+                ) : mediaItems.length === 0 ? (
+                  <div style={{ fontSize: 12, color: '#999' }}>No media found on this product in MDM.</div>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
+                    {mediaItems.map(m => (
+                      <img
+                        key={m.id}
+                        src={m.url}
+                        alt={m.alt ?? ''}
+                        onClick={() => setLightboxUrl(m.url)}
+                        style={{ width: '100%', height: 90, objectFit: 'cover', borderRadius: 4, border: '1px solid #e0e4e8', cursor: 'zoom-in' }}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {activeTab === 'Inventory' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                 <Dropdown
@@ -324,6 +413,37 @@ const PriceInventoryModal = ({ product, onClose }) => {
           )}
         </div>
       </div>
+      {lightboxUrl && ReactDOM.createPortal(
+        // Same pattern as SellerProducts.js's own media lightbox — portaled
+        // to document.body so it isn't clipped by the Modal's own
+        // scrollable content container.
+        <div
+          onClick={() => setLightboxUrl(null)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 99999,
+            background: 'rgba(0,0,0,0.85)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'zoom-out',
+          }}
+        >
+          <img
+            src={lightboxUrl}
+            alt=""
+            style={{ maxWidth: '90vw', maxHeight: '90vh', objectFit: 'contain', borderRadius: 4 }}
+          />
+          <button
+            onClick={() => setLightboxUrl(null)}
+            style={{
+              position: 'fixed', top: 20, right: 24,
+              background: 'none', border: 'none', color: '#fff',
+              fontSize: 28, lineHeight: 1, cursor: 'pointer',
+            }}
+          >
+            ×
+          </button>
+        </div>,
+        document.body
+      )}
     </Modal>
   )
 }
