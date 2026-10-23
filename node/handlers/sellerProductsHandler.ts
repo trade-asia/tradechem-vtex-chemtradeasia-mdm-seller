@@ -522,13 +522,39 @@ export async function getSellerPriceInventory(ctx: ServiceContext<Clients>) {
   // walk for the same pattern), indentation by depth is enough context.
   // Confirmed live 2026-10-22: each node is { value: {id, name, isActive},
   // children: [...] } — id/name sit under .value, not the node itself.
+  //
+  // Confirmed live 2026-10-23 (QA report: empty dropdown, raw response
+  // showed real categories, every one isActive: false): VTEX built a
+  // workaround for Seller Portal accounts with no category tree of their
+  // own — they're handed the MARKETPLACE's own tree instead, so there's
+  // still something meaningful to assign products to. In that workaround
+  // every node comes back isActive: false, even though all of them are
+  // valid to pick — false there means "not owned by this account", not
+  // "disabled". The plain isActive!==false filter below was written for
+  // the normal case (a seller with their own managed tree, where false
+  // really does mean "retired, don't show it"). Detect which situation
+  // this is: if literally nothing in the tree is ever active, nothing is
+  // being disabled on purpose — show it all. A genuine mix still filters
+  // out the false ones exactly as before.
+  const anyActiveNode = (nodes: any[]): boolean => {
+    for (const node of nodes ?? []) {
+      const value = node?.value ?? node
+      if (value?.isActive === true) return true
+      if (Array.isArray(node?.children) && anyActiveNode(node.children)) return true
+    }
+    return false
+  }
+  const categoriesAllInactive = categoriesResult.items.length > 0 && !anyActiveNode(categoriesResult.items)
+
   const flatCategories: { id: string; name: string; depth: number }[] = []
   const walk = (nodes: any[], depth: number) => {
     for (const node of nodes ?? []) {
       const value = node?.value ?? node
       const id = value?.id ?? value?.Id
       const name = value?.name ?? value?.Name
-      if (id != null && value?.isActive !== false) flatCategories.push({ id: String(id), name: `${'— '.repeat(depth)}${name}`, depth })
+      if (id != null && (categoriesAllInactive || value?.isActive !== false)) {
+        flatCategories.push({ id: String(id), name: `${'— '.repeat(depth)}${name}`, depth })
+      }
       if (Array.isArray(node?.children)) walk(node.children, depth + 1)
     }
   }
@@ -550,11 +576,17 @@ export async function getSellerPriceInventory(ctx: ServiceContext<Clients>) {
     ? (() => { try { return JSON.stringify(categoriesResult.raw).slice(0, 2000) } catch { return String(categoriesResult.raw) } })()
     : undefined
 
+  // Same reasoning as categoriesAllInactive above — if this account's
+  // brand list turns out to be the same kind of all-inactive marketplace
+  // workaround, don't let the isActive filter silently empty it too.
+  const brandsAllInactive = brandsResult.items.length > 0
+    && !brandsResult.items.some((b: any) => (b.isActive ?? b.IsActive) === true)
+
   ctx.body = {
     success: true,
     linked: false,
     brands: brandsResult.items
-      .filter((b: any) => (b.isActive ?? b.IsActive) !== false)
+      .filter((b: any) => brandsAllInactive || (b.isActive ?? b.IsActive) !== false)
       .map((b: any) => ({ id: String(b.id ?? b.Id), name: b.name ?? b.Name })),
     brandsDebug,
     categories: flatCategories,
