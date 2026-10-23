@@ -1000,34 +1000,43 @@ const SellerProducts = () => {
 
       {sellerInfo && (
         <div style={{
-          display: 'flex', alignItems: 'center', gap: 10,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
           fontSize: 12, color: '#475569', background: '#f1f5f9', border: '1px solid #e2e8f0',
           borderRadius: 6, padding: '6px 12px', margin: '16px 0',
         }}>
-          {sellerInfo.logoUrl ? (
-            <img
-              src={sellerInfo.logoUrl} alt=""
-              style={{ width: 24, height: 24, borderRadius: 4, objectFit: 'cover', flexShrink: 0 }}
-            />
-          ) : (
-            // Same initial-letter placeholder VTEX's own Company Information
-            // screen uses when no logo is uploaded.
-            <div style={{
-              width: 24, height: 24, borderRadius: 4, background: '#cbd5e1', color: '#475569',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 12, fontWeight: 700, flexShrink: 0,
-            }}>
-              {(sellerInfo.companyName || sellerInfo.vtexAccount || '?').charAt(0).toUpperCase()}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+            {sellerInfo.logoUrl ? (
+              <img
+                src={sellerInfo.logoUrl} alt=""
+                style={{ width: 24, height: 24, borderRadius: 4, objectFit: 'cover', flexShrink: 0 }}
+              />
+            ) : (
+              // Same initial-letter placeholder VTEX's own Company Information
+              // screen uses when no logo is uploaded.
+              <div style={{
+                width: 24, height: 24, borderRadius: 4, background: '#cbd5e1', color: '#475569',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 12, fontWeight: 700, flexShrink: 0,
+              }}>
+                {(sellerInfo.companyName || sellerInfo.vtexAccount || '?').charAt(0).toUpperCase()}
+              </div>
+            )}
+            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '2px 10px' }}>
+              <strong style={{ color: '#142032' }}>{sellerInfo.companyName || sellerInfo.vtexAccount}</strong>
+              <span>{sellerInfo.vtexAccount}</span>
+              {sellerInfo.email && <span>· {sellerInfo.email}</span>}
+              <span>· Seller: {sellerInfo.sellerName || 'Not defined'}</span>
+              <span>· MDM ID <strong style={{ fontFamily: 'monospace' }}>{sellerInfo.mdmSellerId}</strong></span>
+              <span style={{ color: '#94a3b8' }}>· synced just now</span>
             </div>
-          )}
-          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '2px 10px' }}>
-            <strong style={{ color: '#142032' }}>{sellerInfo.companyName || sellerInfo.vtexAccount}</strong>
-            <span>{sellerInfo.vtexAccount}</span>
-            {sellerInfo.email && <span>· {sellerInfo.email}</span>}
-            <span>· Seller: {sellerInfo.sellerName || 'Not defined'}</span>
-            <span>· MDM ID <strong style={{ fontFamily: 'monospace' }}>{sellerInfo.mdmSellerId}</strong></span>
-            <span style={{ color: '#94a3b8' }}>· synced just now</span>
           </div>
+          {/* App version, right-aligned — lets support confirm at a glance
+              which build a seller is actually running. */}
+          {sellerInfo.appVersion && (
+            <span style={{ color: '#94a3b8', fontFamily: 'monospace', flexShrink: 0 }}>
+              v{sellerInfo.appVersion}
+            </span>
+          )}
         </div>
       )}
 

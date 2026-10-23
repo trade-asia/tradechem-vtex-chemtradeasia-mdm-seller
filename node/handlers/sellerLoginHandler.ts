@@ -58,5 +58,11 @@ export async function touchSellerLogin(ctx: ServiceContext<Clients>) {
     // fields above, which come from MDM instead.
     companyName,
     logoUrl,
+    // This app's own installed version — VTEX IO always injects
+    // VTEX_APP_ID as "{vendor}.{name}@{version}" into every service's
+    // process.env, so the version is just the part after '@'. Shown on the
+    // ribbon so support can tell at a glance whether a seller is actually
+    // on the version a fix shipped in.
+    appVersion: process.env.VTEX_APP_ID?.split('@')[1],
   }
 }
