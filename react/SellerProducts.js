@@ -50,6 +50,20 @@ const STATUS_COLORS = {
   rejected: '#dc2626',
 }
 
+// Real offer status for the Published column (2026-10-24, explicit
+// instruction) — five states instead of the old binary published/pending,
+// each with its own label, color and tooltip. "approved" only becomes
+// "published" once the separate liveStatus IsActive check (see that
+// effect's own note) also confirms the product is actually live.
+const OFFER_STATE_DISPLAY = {
+  not_submitted: { label: 'not submitted', color: '#9E9E9E', tooltip: "Not yet added to your own VTEX catalog — use Price & Inventory to set it up." },
+  processing: { label: 'processing', color: '#3b82f6', tooltip: 'Offer is processing for validation' },
+  pending: { label: 'pending', color: '#9E9E9E', tooltip: 'Offer is pending by marketplace admin' },
+  rejected: { label: 'rejected', color: '#dc2626', tooltip: 'Offer is rejected' },
+  approved: { label: 'approved', color: '#FFB300', tooltip: 'Offer is approved but product is not published or product status is not active' },
+  published: { label: 'published', color: '#8BC34A', tooltip: 'Product is on marketplace' },
+}
+
 // SKU column folded into the Product cell's details grid (CAS/HS/Origin
 // already live there) — Actions stays inline below it, not a dropdown menu:
 // only 2-3 actions per row here, so a menu would just add a click without
@@ -683,6 +697,11 @@ const SellerProducts = () => {
   // the list is never blocked waiting on VTEX (see listSellerProducts's own
   // comment). undefined = not checked yet, 'loading' = in flight.
   const [liveStatus, setLiveStatus] = useState({})
+  // Live, independent check against the seller's OWN VTEX catalog (not
+  // MDM) — keyed by mdm sku (2026-10-24, explicit instruction). Same lazy,
+  // one-at-a-time pattern as liveStatus above. Drives both the Price &
+  // Inventory button color and the Published column's real offer state.
+  const [catalogStatus, setCatalogStatus] = useState({})
 
   const [nameFilter, setNameFilter] = useState('')
   const [skuFilter, setSkuFilter] = useState('')
@@ -826,6 +845,43 @@ const SellerProducts = () => {
           setLiveStatus(s => ({ ...s, [id]: data.success ? !!data.isActive : 'error' }))
         } catch {
           if (!cancelled) setLiveStatus(s => ({ ...s, [id]: 'error' }))
+        }
+      }
+    })()
+
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [products])
+
+  // Live, independent check against the seller's own VTEX catalog — one
+  // row at a time, after the list has already rendered (2026-10-24,
+  // explicit instruction: no N calls to MDM on page load, check the
+  // seller's own catalog directly instead). Drives both the Price &
+  // Inventory button color (inSellerCatalog) and the Published column's
+  // real offer state (offerState: not_submitted/processing/pending/
+  // rejected/approved — "approved" vs "published" is decided below by
+  // also folding in the existing liveStatus IsActive check).
+  useEffect(() => {
+    let cancelled = false
+    const toCheck = products.filter(p => p.sku && catalogStatus[p.sku] === undefined)
+    if (toCheck.length === 0) return
+
+    ;(async () => {
+      for (const p of toCheck) {
+        if (cancelled) return
+        setCatalogStatus(s => ({ ...s, [p.sku]: 'loading' }))
+        try {
+          const res = await fetch(`${BASE}/products/seller-catalog-status?mdmSku=${encodeURIComponent(p.sku)}`)
+          const data = await parseResponse(res)
+          if (cancelled) return
+          setCatalogStatus(s => ({
+            ...s,
+            [p.sku]: data.success
+              ? { inSellerCatalog: !!data.inSellerCatalog, offerState: data.offerState ?? 'not_submitted' }
+              : 'error',
+          }))
+        } catch {
+          if (!cancelled) setCatalogStatus(s => ({ ...s, [p.sku]: 'error' }))
         }
       }
     })()
@@ -1221,6 +1277,14 @@ const SellerProducts = () => {
             const rowLiveStatus = p.vtex?.linked ? liveStatus[p.vtex?.vtex_product_id] : undefined
             const isChecking = p.vtex?.linked && (rowLiveStatus === undefined || rowLiveStatus === 'loading')
             const isPublished = p.vtex?.linked && rowLiveStatus === true
+            // Real offer status — see catalogStatus's own progressive-check
+            // effect and OFFER_STATE_DISPLAY above (2026-10-24, explicit
+            // instruction).
+            const rowCatalogStatus = catalogStatus[p.sku]
+            const catalogChecking = rowCatalogStatus === undefined || rowCatalogStatus === 'loading'
+            const inSellerCatalog = typeof rowCatalogStatus === 'object' && !!rowCatalogStatus.inSellerCatalog
+            const rawOfferState = typeof rowCatalogStatus === 'object' ? rowCatalogStatus.offerState : undefined
+            const offerState = rawOfferState === 'approved' && isPublished ? 'published' : rawOfferState
             // Edit/Revert to Pending default to hidden while the live check
             // is still in flight, so they never flash on then immediately
             // disappear once the real state comes back. Once resolved:
@@ -1231,7 +1295,12 @@ const SellerProducts = () => {
             // Revert to Pending (that's only ever meaningful from active).
             const fullyLive = p.status === 'active' && isPublished
             const showEdit = !isChecking && !fullyLive
-            const showRevert = !isChecking && p.status === 'active' && !isPublished
+            // Revert to Pending unwired entirely (2026-10-24, explicit
+            // instruction: not applicable right now) — forced false rather
+            // than deleting the surrounding logic/handlers, in case the
+            // client wants it back later. Was:
+            // !isChecking && p.status === 'active' && !isPublished
+            const showRevert = false
             return (
             <div
               key={p.id ?? idx}
@@ -1301,19 +1370,21 @@ const SellerProducts = () => {
                   <button
                     onClick={() => setPriceInventoryProduct(p)}
                     title={
-                      p.inSellerCatalog
+                      inSellerCatalog
                         ? "This product already exists in your own catalog — manage its price and inventory here."
                         : "Manage this product's price and inventory. Other fields are only editable until your product is approved — after approval, you won't be able to change them."
                     }
                     style={{
                       // Inverted/filled once the product already exists in
-                      // the seller's own catalog (2026-10-23) — a slightly
+                      // the seller's own catalog — now resolved via the
+                      // live, independent catalogStatus check above
+                      // (2026-10-24), not an MDM metadata read — a slightly
                       // darker green than the usual accent so white text
                       // stays readable on top of it.
-                      background: p.inSellerCatalog ? '#15803d' : '#fff',
+                      background: inSellerCatalog ? '#15803d' : '#fff',
                       border: '1px solid #15803d', borderRadius: 4, padding: '3px 10px',
                       fontSize: 11, fontWeight: 600,
-                      color: p.inSellerCatalog ? '#fff' : '#15803d',
+                      color: inSellerCatalog ? '#fff' : '#15803d',
                       cursor: 'pointer',
                     }}
                   >
@@ -1330,6 +1401,10 @@ const SellerProducts = () => {
                       View rejection reason
                     </button>
                   )}
+                  {/* Revert to Pending — unwired (2026-10-24, explicit
+                      instruction: not applicable right now). showRevert is
+                      forced false above, so this never renders; left in
+                      place, not deleted, in case the client wants it back. */}
                   {showRevert && (
                     <>
                       <button
@@ -1348,7 +1423,12 @@ const SellerProducts = () => {
                 </div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, paddingTop: 2 }}>
-                <span onClick={() => handleStatusClick(p)} style={{ cursor: 'pointer' }} title="Click to check live MDM + marketplace status">
+                {/* Status modal unwired (2026-10-24, explicit instruction) —
+                    not deleted, just no longer clickable. Restore by
+                    swapping this back for:
+                    <span onClick={() => handleStatusClick(p)} style={{ cursor: 'pointer' }} title="Click to check live MDM + marketplace status">
+                */}
+                <span>
                   <Tag bgColor={STATUS_COLORS[p.status] ?? '#9E9E9E'} color="#fff">{p.status}</Tag>
                 </span>
                 {p.status === 'rejected' && (
@@ -1368,16 +1448,18 @@ const SellerProducts = () => {
                 )}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', paddingTop: 2 }}>
-                {/* Live-checked per row, progressively (not just "linked")
-                    — confirmed live 2026-10-22: a linked product can still
-                    be Inactive in VTEX, so "published" only shows once
-                    that's actually confirmed. */}
-                {isChecking ? (
+                {/* Live-checked per row, progressively — real offer status
+                    (not_submitted/processing/pending/rejected/approved/
+                    published), each with its own tooltip (2026-10-24,
+                    explicit instruction). */}
+                {catalogChecking ? (
                   <Tag bgColor="#e2e8f0" color="#64748b">checking…</Tag>
                 ) : (
-                  <Tag bgColor={isPublished ? '#8BC34A' : '#9E9E9E'} color="#fff">
-                    {isPublished ? 'published' : 'pending'}
-                  </Tag>
+                  <span title={OFFER_STATE_DISPLAY[offerState]?.tooltip}>
+                    <Tag bgColor={OFFER_STATE_DISPLAY[offerState]?.color ?? '#9E9E9E'} color="#fff">
+                      {OFFER_STATE_DISPLAY[offerState]?.label ?? offerState}
+                    </Tag>
+                  </span>
                 )}
               </div>
               <div style={{ fontSize: 12, color: '#666', paddingTop: 2, fontFamily: 'monospace', textAlign: 'center' }}>
@@ -1421,6 +1503,12 @@ const SellerProducts = () => {
       {documentsProduct && <DocumentsModal product={documentsProduct} onClose={() => setDocumentsProduct(null)} />}
       {priceInventoryProduct && <PriceInventoryModal product={priceInventoryProduct} onClose={() => setPriceInventoryProduct(null)} />}
       {rejectionProduct && <RejectionReasonModal product={rejectionProduct} onClose={() => setRejectionProduct(null)} />}
+      {/* Revert to Pending confirm modal — unwired (2026-10-24, explicit
+          instruction: not applicable right now). confirmUnpublishProduct
+          is never set anymore (its only setter, handleRevertClick, is
+          only called from the now-dead button above), so this never
+          renders; left in place, not deleted, in case the client wants
+          it back. */}
       {confirmUnpublishProduct && (
         <Modal
           isOpen
@@ -1485,6 +1573,8 @@ const SellerProducts = () => {
           </div>
         </Modal>
       )}
+      {/* ProductStatusModal unwired (2026-10-24, explicit instruction) —
+          commented out, not deleted, so it can come back if needed:
       {statusCheckProduct && (
         <ProductStatusModal
           product={statusCheckProduct}
@@ -1494,6 +1584,7 @@ const SellerProducts = () => {
           onClose={() => setStatusCheckProduct(null)}
         />
       )}
+      */}
       {showImport && (
         <ImportModal
           onClose={() => setShowImport(false)}

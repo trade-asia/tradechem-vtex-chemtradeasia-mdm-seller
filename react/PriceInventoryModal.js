@@ -212,7 +212,11 @@ const PriceInventoryModal = ({ product, onClose }) => {
     let cancelled = false
     setLoading(true)
     setLoadError(null)
-    const params = new URLSearchParams({ mdmProductId: product.id })
+    // mdmSku: lets the backend fall back to a live, independent check
+    // against the seller's own VTEX catalog (by RefId) when MDM has no
+    // metadata record yet, instead of assuming the product was never
+    // created (2026-10-24).
+    const params = new URLSearchParams({ mdmProductId: product.id, mdmSku: product.sku })
     fetch(`${BASE}/products/price-inventory?${params.toString()}`)
       .then(parseResponse)
       .then(data => {
@@ -408,7 +412,13 @@ const PriceInventoryModal = ({ product, onClose }) => {
         const res = await fetch(`${BASE}/products/price-inventory`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ mdmProductId: product.id, sellerPid, sellerSid, price, listPrice: listPrice || undefined, warehouseId, quantity, unlimitedQuantity }),
+          body: JSON.stringify({
+            mdmProductId: product.id, sellerPid, sellerSid, price, listPrice: listPrice || undefined, warehouseId, quantity, unlimitedQuantity,
+            // Only meaningful once the marketplace side already has this
+            // product linked — included opportunistically so the metadata
+            // record gets it too (2026-10-24).
+            marketplaceProductId: product.vtex?.vtex_product_id, marketplaceSkuId: product.vtex?.vtex_sku_id,
+          }),
         })
         const data = await parseResponse(res)
         if (!data.success) {

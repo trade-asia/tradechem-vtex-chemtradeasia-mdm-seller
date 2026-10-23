@@ -29,6 +29,30 @@ export class SellerCatalogClient extends ExternalClient {
     return this.http.get(`/api/catalog-seller-portal/products/${productId}`, { headers: this.userHeaders(userToken) })
   }
 
+  // GET /api/catalog-seller-portal/products/sku-external-id={value} —
+  // confirmed via VTEX's own published OpenAPI schema
+  // (github.com/vtex/openapi-schemas, "VTEX - Catalog API Seller
+  // Portal.json"): the {param} path segment takes the form
+  // "sku-external-id={value}" and looks a product up directly by its SKU's
+  // external id — this app's RefId convention (the MDM sku). Used to check
+  // the seller's own catalog live/independently (2026-10-24, explicit
+  // instruction), without trusting a cached seller_product_id/
+  // seller_sku_id from MDM's metadata. Returns the product with its skus[]
+  // array ({id, externalId, isActive, ...} per sku) — the caller matches
+  // the right sku by externalId === the RefId searched for, same as
+  // extractSellerIds' own note about this API's confirmed shape.
+  public async getProductBySkuExternalId(skuExternalId: string, userToken?: string): Promise<any | null> {
+    try {
+      return await this.http.get(
+        `/api/catalog-seller-portal/products/sku-external-id=${encodeURIComponent(skuExternalId)}`,
+        { headers: this.userHeaders(userToken) }
+      )
+    } catch (err: any) {
+      if (err?.response?.status === 404) return null
+      throw err
+    }
+  }
+
   // License Manager's "Get information about account" — confirmed live
   // schema from VTEX's own OpenAPI file (github.com/vtex/openapi-schemas,
   // "VTEX - License Manager API.json"), unlike the Seller Portal Catalog

@@ -26,6 +26,10 @@
       "path": "/_v/mdm-seller/products/vtex-status",
       "public": true
     },
+    "sellerCatalogStatus": {
+      "path": "/_v/mdm-seller/products/seller-catalog-status",
+      "public": true
+    },
     "sellerProductEditLink": {
       "path": "/_v/mdm-seller/products/edit-link",
       "public": true

@@ -2,7 +2,7 @@ import { ServiceContext } from '@vtex/api'
 import axios from 'axios'
 import { Clients } from '../clients'
 import { getMdmToken, clearMdmToken } from '../helpers/getMdmToken'
-import { ensureSellerSynced } from '../helpers/sellerSync'
+import { ensureSellerSynced, decodeEmailFromAdminToken } from '../helpers/sellerSync'
 import { readMdmConfig, forceRefreshMdmConfig } from './devSettingsHandler'
 import { readBody } from '../helpers/readBody'
 import {
@@ -239,24 +239,13 @@ export async function listSellerProducts(ctx: ServiceContext<Clients>) {
       sort_direction: q.sort_direction,
     }))
 
-    // Whether each product already exists in the SELLER's OWN catalog (via
-    // Price & Inventory — sellerPid in MDM metadata) — entirely separate
-    // from marketplace-link/Published status (that one's deliberately left
-    // to a slower per-row live VTEX check, done progressively from the
-    // frontend; this one is just a cheap MDM metadata read, so there's no
-    // reason to pay for a second round trip per row — it's folded in here
-    // instead, in parallel, same enrichment pattern as Export's columns).
-    const products = Array.isArray(result?.products) ? result.products : []
-    await Promise.all(products.map(async (p: any) => {
-      if (!p?.id) return
-      try {
-        const metadata = await withAuthRetry(ctx, auth, a => ctx.clients.mdm.getProductMetadata(a.token, p.id))
-        p.inSellerCatalog = !!metadata?.vtexPriceInventory?.sellerPid
-      } catch {
-        p.inSellerCatalog = false
-      }
-    }))
-
+    // Whether each product already exists in the SELLER's OWN catalog, and
+    // its real offer status, used to be resolved here via N parallel MDM
+    // metadata reads. Removed (2026-10-24, explicit instruction: check the
+    // seller's own VTEX catalog independently, not MDM, and lazily — not
+    // N calls on every page load) — see getSellerCatalogStatus above,
+    // called progressively one row at a time from the frontend instead,
+    // same pattern the marketplace-link Published check already used.
     ctx.body = { success: true, ...result }
   } catch (err: any) {
     ctx.body = { success: false, error: 'Failed to load products', detail: mdmErrDetail(err) }
@@ -418,30 +407,214 @@ function extractSellerIds(res: any): { sellerPid?: string; sellerSid?: string } 
   }
 }
 
-// Durable link record (sellerPid/sellerSid + last-saved price/inventory),
-// stored entirely in MDM's metadata endpoint now — keyed by mdm_product_id
-// (always available, linked or not), per MDM's 2026-10-22 follow-up adding
-// that route specifically for this. No VBase fallback needed anymore: MDM
-// confirmed metadata pushed pre-link carries over automatically once a
-// product later gets linked, and they've flagged mdm_product_id as the
-// identifier they may standardize on long-term, so this is also the
-// forward-compatible choice — see MdmClient.ts's own note.
+// Same response family as extractSellerIds above, but for a
+// sku-external-id lookup specifically — a product can carry more than one
+// SKU, so the one matching the RefId actually searched for has to be
+// picked out of skus[] by its own externalId, not just taken as skus[0].
+function extractSellerIdsByExternalId(res: any, externalId: string): { sellerPid?: string; sellerSid?: string } {
+  const productId = res?.id ?? res?.Id
+  const skus = Array.isArray(res?.skus) ? res.skus : (Array.isArray(res?.Skus) ? res.Skus : [])
+  const match = skus.find((s: any) => String(s?.externalId ?? s?.ExternalId ?? '') === String(externalId))
+  const skuId = match?.id ?? match?.Id
+  return {
+    sellerPid: productId != null ? String(productId) : undefined,
+    sellerSid: skuId != null ? String(skuId) : undefined,
+  }
+}
+
+// 2026-10-24, explicit instruction: the real offer status, not just
+// whether the linked product happens to be Active — five states:
+//   not_submitted — never set up in the seller's own catalog at all
+//   processing    — in the seller's own catalog, but VTEX's matcher
+//                   hasn't produced a Suggestions record for it yet
+//   pending       — offer submitted, marketplace admin hasn't reviewed it
+//   rejected      — denied by the marketplace
+//   approved      — resolved (accepted) by the marketplace, but the
+//                   linked product isn't confirmed Active yet — that part
+//                   is checked separately via the existing vtex-status
+//                   endpoint (same live IsActive check the frontend
+//                   already runs); "approved but not yet Active" vs.
+//                   "approved and live" (published) is the frontend's own
+//                   distinction, not this endpoint's.
+// No value is hardcoded for "resolved" (approved) beyond ruling out
+// pending/rejected, since the exact accepted-status string is unconfirmed
+// for this account (only "Pending"/"Accepted"/"Denied" seen live so far,
+// from the marketplace admin app's own work on this same Suggestions API).
+function isPendingOfferStatus(status?: string | null): boolean {
+  if (!status) return true
+  return /pending|waiting/i.test(String(status))
+}
+function isRejectedOfferStatus(status?: string | null): boolean {
+  return /den(y|ied)|reject/i.test(String(status ?? ''))
+}
+
+// GET /_v/mdm-seller/products/seller-catalog-status?mdmSku=
+// Checks the seller's OWN VTEX catalog directly, by the SKU's own RefId
+// (2026-10-24, explicit instruction: "instead of reading mdm we shall
+// check this in seller catalog independently") — no MDM metadata read at
+// all, and no trust in any previously-cached seller_product_id/
+// seller_sku_id. Meant to be called lazily, one row at a time, from the
+// product list (mirrors the existing vtex-status progressive-check
+// pattern) rather than synchronously for every row on page load — the old
+// approach did exactly that via N parallel MDM metadata reads, which this
+// replaces. Once the seller's own product/SKU is found this way, also
+// resolves the real offer status from the Suggestions API in the same
+// call, since both need the same sellerSid this lookup already produces.
+export async function getSellerCatalogStatus(ctx: ServiceContext<Clients>) {
+  ctx.status = 200
+  const mdmSku = (ctx.query as any).mdmSku as string | undefined
+  if (!mdmSku) {
+    ctx.body = { success: false, error: 'mdmSku is required' }
+    return
+  }
+
+  const userToken = (ctx.vtex as any)?.adminUserAuthToken
+
+  let product: any = null
+  try {
+    product = await ctx.clients.sellerCatalog.getProductBySkuExternalId(mdmSku, userToken)
+  } catch (err: any) {
+    ctx.body = { success: false, error: "Couldn't check your own VTEX catalog", detail: vtexErrDetail(err) }
+    return
+  }
+
+  if (!product) {
+    ctx.body = { success: true, inSellerCatalog: false, offerState: 'not_submitted' }
+    return
+  }
+
+  const { sellerPid, sellerSid } = extractSellerIdsByExternalId(product, mdmSku)
+  if (!sellerSid) {
+    ctx.body = { success: true, inSellerCatalog: false, offerState: 'not_submitted' }
+    return
+  }
+
+  let offerState: string = 'processing'
+  try {
+    let settings: any
+    try { settings = await readMdmConfig(ctx) } catch {}
+    const { vtexAppKey, vtexAppToken } = settings ?? {}
+    if (vtexAppKey && vtexAppToken) {
+      const suggestion = await ctx.clients.vtexSuggestions.getSuggestion(vtexAppKey, vtexAppToken, ctx.vtex.account, sellerSid)
+      if (!suggestion) {
+        offerState = 'processing'
+      } else {
+        const status = suggestion.Status ?? suggestion.status
+        offerState = isRejectedOfferStatus(status) ? 'rejected' : isPendingOfferStatus(status) ? 'pending' : 'approved'
+      }
+    }
+  } catch {
+    // Offer-status lookup is a nice-to-have on top of the catalog check
+    // above (which already succeeded) — a failure here shouldn't hide
+    // that the product genuinely does exist in the seller's own catalog.
+  }
+
+  ctx.body = { success: true, inSellerCatalog: true, sellerPid, sellerSid, offerState }
+}
+
+function pick(obj: any, ...keys: string[]): any {
+  for (const k of keys) {
+    if (obj?.[k] != null && obj[k] !== '') return obj[k]
+  }
+  return undefined
+}
+
+// Durable link record (seller_product_id/seller_sku_id + last-saved price/
+// inventory), stored entirely in MDM's metadata endpoint — keyed by
+// mdm_product_id (always available, linked or not), per MDM's 2026-10-22
+// follow-up adding that route specifically for this. No VBase fallback
+// needed: MDM confirmed metadata pushed pre-link carries over
+// automatically once a product later gets linked.
 //
-// sellerPid/sellerSid are this SELLER's own independent catalog ids —
-// unrelated to and never validated against vtex_product_id/vtex.linked
-// (whether admin has imported/linked the MDM product into the
-// marketplace's own catalog, used elsewhere in this handler for
-// Export/live-status). The two linking relationships are intentionally
-// kept separate; this endpoint never checks the other one.
-interface PriceInventoryRecord {
-  sellerPid: string
-  sellerSid: string
+// seller_product_id/seller_sku_id are this SELLER's own independent
+// catalog ids — unrelated to and never validated against
+// vtex_product_id/vtex.linked (whether admin has imported/linked the MDM
+// product into the marketplace's own catalog, used elsewhere in this
+// handler for Export/live-status). The two linking relationships are
+// intentionally kept separate; this endpoint never checks the other one.
+//
+// Renamed from "vtexPriceInventory" to "SellerDashboard" and every field
+// to snake_case (2026-10-24, explicit instruction), with new identity
+// fields (seller_id/seller_mdm_id/seller_email) and, once the marketplace
+// side is confirmed, marketplace_product_id/marketplace_sku_id. Existing
+// records already saved under the old key/shape are left exactly as they
+// are (explicit instruction: "if metadata is already there then no need
+// to change anything") — readSellerDashboardRecord below still reads
+// them, normalized into the same shape, as a fallback; only new writes
+// use the new key and field names.
+const METADATA_KEY = 'SellerDashboard'
+const LEGACY_METADATA_KEY = 'vtexPriceInventory'
+
+interface SellerDashboardRecord {
+  seller_product_id: string
+  seller_sku_id: string
   price: number
-  listPrice: number | null
-  warehouseId: string
+  list_price: number | null
+  warehouse_id: string
   quantity: number | null
-  unlimitedQuantity: boolean
-  updatedAt: string
+  unlimited_quantity: boolean
+  updated_at: string
+  seller_id: string
+  seller_mdm_id: number
+  seller_email?: string
+  marketplace_product_id?: string
+  marketplace_sku_id?: string
+}
+
+// Common internal shape used by the rest of this file, whichever of the
+// old or new record shapes was actually found.
+interface SellerDashboardSaved {
+  sellerPid?: string
+  sellerSid?: string
+  price?: number
+  listPrice?: number | null
+  warehouseId?: string
+  quantity?: number | null
+  unlimitedQuantity?: boolean
+}
+
+function readSellerDashboardRaw(metadata: any): any | null {
+  return metadata?.[METADATA_KEY] ?? metadata?.[LEGACY_METADATA_KEY] ?? null
+}
+
+function normalizeSellerDashboardRecord(raw: any): SellerDashboardSaved | null {
+  if (!raw) return null
+  return {
+    sellerPid: pick(raw, 'seller_product_id', 'sellerPid'),
+    sellerSid: pick(raw, 'seller_sku_id', 'sellerSid'),
+    price: pick(raw, 'price'),
+    listPrice: pick(raw, 'list_price', 'listPrice'),
+    warehouseId: pick(raw, 'warehouse_id', 'warehouseId'),
+    quantity: pick(raw, 'quantity'),
+    unlimitedQuantity: pick(raw, 'unlimited_quantity', 'unlimitedQuantity'),
+  }
+}
+
+function buildSellerDashboardRecord(fields: {
+  sellerPid: string; sellerSid: string; price: number; listPrice: number | null
+  warehouseId: string; quantity: number | null; unlimitedQuantity: boolean
+  sellerId: string; sellerMdmId: number; sellerEmail?: string
+  marketplaceProductId?: string; marketplaceSkuId?: string
+}): SellerDashboardRecord {
+  return {
+    seller_product_id: fields.sellerPid,
+    seller_sku_id: fields.sellerSid,
+    price: fields.price,
+    list_price: fields.listPrice,
+    warehouse_id: fields.warehouseId,
+    quantity: fields.quantity,
+    unlimited_quantity: fields.unlimitedQuantity,
+    updated_at: new Date().toISOString(),
+    seller_id: fields.sellerId,
+    seller_mdm_id: fields.sellerMdmId,
+    ...(fields.sellerEmail ? { seller_email: fields.sellerEmail } : {}),
+    // Only included once the product is actually published/available in
+    // the marketplace (2026-10-24, explicit instruction) — undefined
+    // fields are stripped by JSON.stringify, so these simply don't appear
+    // in the saved record until the frontend has them to send.
+    ...(fields.marketplaceProductId ? { marketplace_product_id: fields.marketplaceProductId } : {}),
+    ...(fields.marketplaceSkuId ? { marketplace_sku_id: fields.marketplaceSkuId } : {}),
+  }
 }
 
 // GET /_v/mdm-seller/products/price-inventory?mdmProductId=
@@ -461,6 +634,10 @@ interface PriceInventoryRecord {
 export async function getSellerPriceInventory(ctx: ServiceContext<Clients>) {
   ctx.status = 200
   const mdmProductId = (ctx.query as any).mdmProductId as string | undefined
+  // mdmSku: the product's RefId — optional, but needed for the live
+  // catalog fallback below (2026-10-24). The frontend already has this on
+  // every product row, so it's just passed straight through.
+  const mdmSku = (ctx.query as any).mdmSku as string | undefined
   if (!mdmProductId) {
     ctx.body = { success: false, error: 'mdmProductId is required' }
     return
@@ -470,10 +647,11 @@ export async function getSellerPriceInventory(ctx: ServiceContext<Clients>) {
 
   const userToken = (ctx.vtex as any)?.adminUserAuthToken
 
-  let saved: PriceInventoryRecord | null = null
+  let metadata: any = null
+  let saved: SellerDashboardSaved | null = null
   try {
-    const metadata = await withAuthRetry(ctx, auth, a => ctx.clients.mdm.getProductMetadata(a.token, mdmProductId))
-    if (metadata?.vtexPriceInventory?.sellerPid) saved = metadata.vtexPriceInventory
+    metadata = await withAuthRetry(ctx, auth, a => ctx.clients.mdm.getProductMetadata(a.token, mdmProductId))
+    saved = normalizeSellerDashboardRecord(readSellerDashboardRaw(metadata))
   } catch {
     // Falls through to the not-linked/creation path below.
   }
@@ -500,6 +678,61 @@ export async function getSellerPriceInventory(ctx: ServiceContext<Clients>) {
     } catch {
       // VTEX no longer has this product (deleted, or the stored id is
       // stale/wrong) — fall through to the not-linked/creation path below.
+    }
+  }
+
+  // No usable metadata record — but the product may already exist in the
+  // seller's own catalog regardless (metadata lost, never written, or
+  // this is the first open since the live-check feature shipped).
+  // Checked independently via the same RefId lookup getSellerCatalogStatus
+  // uses, rather than assuming "no metadata" means "doesn't exist" and
+  // risking a duplicate create. If found this way, the metadata record is
+  // backfilled now (2026-10-24, explicit instruction: "if we open the
+  // modal then it should push the data to metadata if metadata is not
+  // present") — never overwrites metadata that was already there; this
+  // whole block only runs when saved is falsy.
+  if (mdmSku) {
+    try {
+      const liveProduct = await ctx.clients.sellerCatalog.getProductBySkuExternalId(mdmSku, userToken)
+      if (liveProduct) {
+        const { sellerPid, sellerSid } = extractSellerIdsByExternalId(liveProduct, mdmSku)
+        if (sellerPid && sellerSid) {
+          // Price/inventory aren't known yet from this fallback path alone
+          // (no price-read endpoint on sellerPricing) — left blank; the
+          // admin fills them in via the same already-editable fields
+          // "linked" mode shows, same as any other existing product.
+          const warehouses = await ctx.clients.sellerCatalog.listWarehouses(userToken)
+
+          try {
+            const record = buildSellerDashboardRecord({
+              sellerPid, sellerSid,
+              price: 0, listPrice: null,
+              warehouseId: '', quantity: null, unlimitedQuantity: false,
+              sellerId: auth.vtexSellerId, sellerMdmId: auth.mdmSellerId,
+              sellerEmail: decodeEmailFromAdminToken(userToken),
+            })
+            await withAuthRetry(ctx, auth, a => ctx.clients.mdm.setProductMetadata(a.token, mdmProductId, { ...(metadata ?? {}), [METADATA_KEY]: record }))
+          } catch {
+            // Backfill is best-effort — the live-found product is still
+            // real and still worth showing even if this write fails.
+          }
+
+          ctx.body = {
+            success: true,
+            linked: true,
+            sellerPid, sellerSid,
+            price: '',
+            listPrice: '',
+            warehouseId: '',
+            quantity: '',
+            unlimitedQuantity: false,
+            warehouses: warehouses.map((w: any) => ({ id: w.id, name: w.name })),
+          }
+          return
+        }
+      }
+    } catch {
+      // Live fallback failed too — fall through to the creation path below.
     }
   }
 
@@ -610,7 +843,7 @@ export async function saveSellerPriceInventory(ctx: ServiceContext<Clients>) {
   let parsed: any = {}
   try { parsed = JSON.parse(raw) } catch {}
 
-  const { mdmProductId, price, listPrice, warehouseId, quantity, unlimitedQuantity, sellerPid, sellerSid } = parsed
+  const { mdmProductId, price, listPrice, warehouseId, quantity, unlimitedQuantity, sellerPid, sellerSid, marketplaceProductId, marketplaceSkuId } = parsed
 
   if (!mdmProductId || !sellerPid || !sellerSid) {
     ctx.body = { success: false, error: 'mdmProductId, sellerPid and sellerSid are required — a new product is created via the step wizard, not this endpoint' }
@@ -634,7 +867,7 @@ export async function saveSellerPriceInventory(ctx: ServiceContext<Clients>) {
     return
   }
 
-  const record: PriceInventoryRecord = {
+  const record = buildSellerDashboardRecord({
     sellerPid: String(sellerPid),
     sellerSid: String(sellerSid),
     price: Number(price),
@@ -642,13 +875,17 @@ export async function saveSellerPriceInventory(ctx: ServiceContext<Clients>) {
     warehouseId: String(warehouseId),
     quantity: unlimitedQuantity ? null : Number(quantity),
     unlimitedQuantity: !!unlimitedQuantity,
-    updatedAt: new Date().toISOString(),
-  }
+    sellerId: auth.vtexSellerId,
+    sellerMdmId: auth.mdmSellerId,
+    sellerEmail: decodeEmailFromAdminToken(userToken),
+    marketplaceProductId: marketplaceProductId ? String(marketplaceProductId) : undefined,
+    marketplaceSkuId: marketplaceSkuId ? String(marketplaceSkuId) : undefined,
+  })
 
   let metadataError: string | undefined
   try {
     const current = (await withAuthRetry(ctx, auth, a => ctx.clients.mdm.getProductMetadata(a.token, mdmProductId))) ?? {}
-    await withAuthRetry(ctx, auth, a => ctx.clients.mdm.setProductMetadata(a.token, mdmProductId, { ...current, vtexPriceInventory: record }))
+    await withAuthRetry(ctx, auth, a => ctx.clients.mdm.setProductMetadata(a.token, mdmProductId, { ...current, [METADATA_KEY]: record }))
   } catch (err: any) {
     metadataError = mdmErrDetail(err)
   }
@@ -841,9 +1078,9 @@ export async function runPriceInventoryStep(ctx: ServiceContext<Clients>) {
     }
 
     if (step === 'finalize') {
-      const { sellerPid, sellerSid, price, listPrice, warehouseId, quantity, unlimitedQuantity } = body
+      const { sellerPid, sellerSid, price, listPrice, warehouseId, quantity, unlimitedQuantity, marketplaceProductId, marketplaceSkuId } = body
       if (!sellerPid || !sellerSid) { ctx.body = { success: false, error: 'sellerPid and sellerSid are required' }; return }
-      const record: PriceInventoryRecord = {
+      const record = buildSellerDashboardRecord({
         sellerPid: String(sellerPid),
         sellerSid: String(sellerSid),
         price: Number(price),
@@ -851,11 +1088,15 @@ export async function runPriceInventoryStep(ctx: ServiceContext<Clients>) {
         warehouseId: String(warehouseId),
         quantity: unlimitedQuantity ? null : Number(quantity),
         unlimitedQuantity: !!unlimitedQuantity,
-        updatedAt: new Date().toISOString(),
-      }
+        sellerId: auth.vtexSellerId,
+        sellerMdmId: auth.mdmSellerId,
+        sellerEmail: decodeEmailFromAdminToken(userToken),
+        marketplaceProductId: marketplaceProductId ? String(marketplaceProductId) : undefined,
+        marketplaceSkuId: marketplaceSkuId ? String(marketplaceSkuId) : undefined,
+      })
       try {
         const current = (await withAuthRetry(ctx, auth, a => ctx.clients.mdm.getProductMetadata(a.token, mdmProductId))) ?? {}
-        await withAuthRetry(ctx, auth, a => ctx.clients.mdm.setProductMetadata(a.token, mdmProductId, { ...current, vtexPriceInventory: record }))
+        await withAuthRetry(ctx, auth, a => ctx.clients.mdm.setProductMetadata(a.token, mdmProductId, { ...current, [METADATA_KEY]: record }))
         ctx.body = { success: true }
       } catch (err: any) {
         ctx.body = { success: false, error: 'Failed to save this to MDM', detail: mdmErrDetail(err) }
