@@ -27,6 +27,61 @@ const parseResponse = async (res) => {
 const TABS_CREATE = ['Basic Information', 'Operations & Logistics', 'SKU Information', 'Media', 'Inventory', 'Price']
 const TABS_LINKED = ['Inventory', 'Price']
 
+// Step-chain wizard for first-time creation (2026-10-23, explicit
+// instruction) — matches the marketplace admin app's own Import/Link step
+// wizard: each step is independently retryable, nothing is best-effort.
+// A failure at media-attach no longer gets silently swallowed as a
+// non-blocking warning after the product already "succeeded" — the whole
+// save halts there until that step itself succeeds.
+const STEP_ORDER = ['mediaCheck', 'product', 'mediaAttach', 'price', 'inventory', 'finalize']
+const STEP_LABELS = {
+  mediaCheck: 'Checking media',
+  product: 'Creating product',
+  mediaAttach: 'Attaching media',
+  price: 'Setting price',
+  inventory: 'Setting inventory',
+  finalize: 'Saving record',
+}
+const pendingSteps = () => STEP_ORDER.reduce((acc, k) => ({ ...acc, [k]: 'pending' }), {})
+
+const StepIcon = ({ status }) => {
+  if (status === 'running') return <Spinner size={16} />
+  const bg = status === 'success' ? '#16a34a' : status === 'error' ? '#dc2626' : '#e2e8f0'
+  return (
+    <div style={{
+      width: 18, height: 18, borderRadius: '50%', flexShrink: 0,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: bg, color: '#fff', fontSize: 11, fontWeight: 700, lineHeight: 1,
+    }}>
+      {status === 'success' ? '✓' : status === 'error' ? '✕' : ''}
+    </div>
+  )
+}
+
+const StepRow = ({ label, status, error, onRetry, last }) => (
+  <div style={{
+    display: 'flex', alignItems: 'flex-start', gap: 10,
+    padding: '10px 0', borderBottom: last ? 'none' : '1px solid #f0f0f0',
+  }}>
+    <div style={{ marginTop: 1 }}><StepIcon status={status} /></div>
+    <div style={{ flex: 1 }}>
+      <div style={{ fontSize: 13, fontWeight: 600, color: status === 'pending' ? '#999' : '#142032' }}>
+        {label}{status === 'running' ? '…' : ''}
+      </div>
+      {status === 'error' && error?.message && (
+        <div style={{ fontSize: 11, color: '#dc2626', marginTop: 4, wordBreak: 'break-word' }}>
+          {error.message}{error.detail ? ` — ${error.detail}` : ''}
+        </div>
+      )}
+      {status === 'error' && onRetry && (
+        <div style={{ marginTop: 6 }}>
+          <Button size="small" variation="secondary" onClick={onRetry}>Retry</Button>
+        </div>
+      )}
+    </div>
+  </div>
+)
+
 const PriceInventoryModal = ({ product, onClose }) => {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
@@ -35,6 +90,13 @@ const PriceInventoryModal = ({ product, onClose }) => {
   const [saveErrorDetail, setSaveErrorDetail] = useState(null)
   const [saved, setSaved] = useState(false)
   const [saveWarning, setSaveWarning] = useState(null)
+
+  // Creation wizard — only ever used for a first-time save (see
+  // STEP_ORDER/STEP_LABELS above). Once wizardActive is true, the form
+  // tabs are replaced by this step list until every step succeeds.
+  const [wizardActive, setWizardActive] = useState(false)
+  const [steps, setSteps] = useState(pendingSteps())
+  const [stepErrors, setStepErrors] = useState({})
 
   const [linked, setLinked] = useState(false)
   // Set once, only from the initial load — never touched by a save in this
@@ -159,67 +221,125 @@ const PriceInventoryModal = ({ product, onClose }) => {
     Number(packageWeight) > 0 && Number(packageWidth) > 0 &&
     Number(packageHeight) > 0 && Number(packageLength) > 0
   )
+  // Mandatory (2026-10-23, explicit instruction) — at least one MDM image
+  // must exist before Save is even clickable. The backend independently
+  // re-validates (and actually downloads) this at save time regardless;
+  // this is just the client-side gate so the seller isn't let as far as a
+  // failed save attempt when it's obviously going to be rejected.
+  const mediaValid = linked || mediaItems.length > 0
   const inventoryValid = !!warehouseId && (unlimitedQuantity || Number(quantity) > 0)
   const priceValid = Number(price) > 0
-  const canSave = creationValid && inventoryValid && priceValid
+  const canSave = creationValid && mediaValid && inventoryValid && priceValid
 
-  const handleSave = async () => {
-    setSaving(true)
-    setSaveError(null)
-    setSaveErrorDetail(null)
+  const callStep = async (step, extra) => {
     try {
-      const res = await fetch(`${BASE}/products/price-inventory`, {
+      const res = await fetch(`${BASE}/products/price-inventory/step`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          mdmProductId: product.id,
-          sellerPid: linked ? sellerPid : undefined,
-          sellerSid: linked ? sellerSid : undefined,
-          name: product.name,
-          refId: product.sku,
-          brandId: brandId || undefined,
-          categoryId: categoryId || undefined,
-          taxCode: taxCode || undefined,
-          ean: ean || undefined,
-          packageWeight: packageWeight || undefined,
-          packageWidth: packageWidth || undefined,
-          packageHeight: packageHeight || undefined,
-          packageLength: packageLength || undefined,
-          price,
-          listPrice: listPrice || undefined,
-          warehouseId,
-          quantity,
-          unlimitedQuantity,
-        }),
+        body: JSON.stringify({ step, mdmProductId: product.id, ...extra }),
       })
-      const data = await parseResponse(res)
-      if (!data.success) {
-        setSaveError(data.error || 'Failed to save')
-        setSaveErrorDetail(data.detail || null)
-        if (data.sellerPid && data.sellerSid) {
-          // Creation itself succeeded, only price/inventory failed — lock
-          // the form onto the linked state so a retry doesn't try to
-          // create the product a second time.
-          setLinked(true)
+      return await parseResponse(res)
+    } catch (err) {
+      return { success: false, error: err.message }
+    }
+  }
+
+  // Runs the wizard from `fromStep` onward, in order. `carry` holds
+  // sellerPid/sellerSid as known so far — null until the product step has
+  // actually succeeded once. A step failure halts the chain right there:
+  // its StepRow shows Retry, and retrying calls this again starting from
+  // that same step, carrying forward whatever already succeeded (so
+  // retrying e.g. media-attach never re-creates the product).
+  const runChain = async (fromStep, carry) => {
+    let sellerPidLocal = carry.sellerPid
+    let sellerSidLocal = carry.sellerSid
+    const startIdx = STEP_ORDER.indexOf(fromStep)
+    for (let i = startIdx; i < STEP_ORDER.length; i++) {
+      const step = STEP_ORDER[i]
+      setSteps(s => ({ ...s, [step]: 'running' }))
+      setStepErrors(e => ({ ...e, [step]: null }))
+
+      let data
+      if (step === 'mediaCheck') {
+        data = await callStep('media-check', {})
+      } else if (step === 'product') {
+        data = await callStep('product', {
+          sellerPid: sellerPidLocal, sellerSid: sellerSidLocal,
+          name: product.name, refId: product.sku,
+          brandId, categoryId, taxCode, ean,
+          packageWeight, packageWidth, packageHeight, packageLength,
+        })
+        if (data.success) {
+          sellerPidLocal = data.sellerPid
+          sellerSidLocal = data.sellerSid
           setSellerPid(data.sellerPid)
           setSellerSid(data.sellerSid)
-          setActiveTab(TABS_LINKED[0])
         }
+      } else if (step === 'mediaAttach') {
+        data = await callStep('media-attach', { sellerSid: sellerSidLocal, name: product.name })
+      } else if (step === 'price') {
+        data = await callStep('price', { sellerSid: sellerSidLocal, price, listPrice })
+      } else if (step === 'inventory') {
+        data = await callStep('inventory', { sellerSid: sellerSidLocal, warehouseId, quantity, unlimitedQuantity })
+      } else {
+        data = await callStep('finalize', { sellerPid: sellerPidLocal, sellerSid: sellerSidLocal, price, listPrice, warehouseId, quantity, unlimitedQuantity })
+      }
+
+      if (!data.success) {
+        setSteps(s => ({ ...s, [step]: 'error' }))
+        setStepErrors(e => ({ ...e, [step]: { message: data.error, detail: data.detail } }))
+        setSaving(false)
         return
       }
-      setLinked(true)
-      setSellerPid(data.sellerPid)
-      setSellerSid(data.sellerSid)
-      setSaved(true)
-      // Soft, non-blocking — the product/price/inventory already succeeded,
-      // which is what actually matters; this just tells the seller if the
-      // media attach or the MDM record-keeping sync didn't fully go through.
-      setSaveWarning([data.mediaError && `Media: ${data.mediaError}`, data.metadataError && `Record-keeping: ${data.metadataError}`].filter(Boolean).join(' · ') || null)
-    } catch (err) {
-      setSaveError(err.message)
-    } finally {
-      setSaving(false)
+      setSteps(s => ({ ...s, [step]: 'success' }))
     }
+
+    setWizardActive(false)
+    setLinked(true)
+    setSaved(true)
+    setActiveTab(TABS_LINKED[0])
+    setSaving(false)
+  }
+
+  const handleRetryStep = (step) => {
+    setSaving(true)
+    runChain(step, { sellerPid, sellerSid })
+  }
+
+  const handleSave = async () => {
+    setSaveError(null)
+    setSaveErrorDetail(null)
+
+    if (linked) {
+      // Already exists — plain price/inventory update, no wizard needed.
+      setSaving(true)
+      try {
+        const res = await fetch(`${BASE}/products/price-inventory`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mdmProductId: product.id, sellerPid, sellerSid, price, listPrice: listPrice || undefined, warehouseId, quantity, unlimitedQuantity }),
+        })
+        const data = await parseResponse(res)
+        if (!data.success) {
+          setSaveError(data.error || 'Failed to save')
+          setSaveErrorDetail(data.detail || null)
+          return
+        }
+        setSaved(true)
+        setSaveWarning(data.metadataError ? `Record-keeping: ${data.metadataError}` : null)
+      } catch (err) {
+        setSaveError(err.message)
+      } finally {
+        setSaving(false)
+      }
+      return
+    }
+
+    setSaving(true)
+    setWizardActive(true)
+    setSteps(pendingSteps())
+    setStepErrors({})
+    runChain('mediaCheck', { sellerPid: null, sellerSid: null })
   }
 
   return (
@@ -272,6 +392,32 @@ const PriceInventoryModal = ({ product, onClose }) => {
               </div>
             )}
 
+            {wizardActive && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>
+                  Creating this product in your catalog — each step below runs on its own, and can be retried on its own if it fails.
+                </div>
+                {STEP_ORDER.map((step, i) => (
+                  <StepRow
+                    key={step}
+                    label={STEP_LABELS[step]}
+                    status={steps[step]}
+                    error={stepErrors[step]}
+                    onRetry={steps[step] === 'error' ? () => handleRetryStep(step) : undefined}
+                    last={i === STEP_ORDER.length - 1}
+                  />
+                ))}
+                {Object.values(steps).some(s => s === 'error') && (
+                  <div style={{ marginTop: 8 }}>
+                    <Button size="small" variation="tertiary" onClick={() => setWizardActive(false)}>
+                      ← Back to form
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {!wizardActive && (<>
             <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid #eee', marginBottom: 16 }}>
               {tabs.map(tab => (
                 <button
@@ -359,7 +505,9 @@ const PriceInventoryModal = ({ product, onClose }) => {
                 {mediaLoading ? (
                   <div style={{ display: 'flex', justifyContent: 'center', padding: 16 }}><Spinner /></div>
                 ) : mediaItems.length === 0 ? (
-                  <div style={{ fontSize: 12, color: '#999' }}>No media found on this product in MDM.</div>
+                  <div style={{ fontSize: 12, color: '#b45309', background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 4, padding: '8px 10px' }}>
+                    No media found on this product in MDM. At least one image is required — add one via Edit, then Sync, before you can save.
+                  </div>
                 ) : (
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
                     {mediaItems.map(m => (
@@ -409,12 +557,13 @@ const PriceInventoryModal = ({ product, onClose }) => {
                 <Input label="List price" type="number" value={listPrice} onChange={e => setListPrice(e.target.value)} />
               </div>
             )}
+            </>)}
           </>
         )}
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 24 }}>
           <Button variation="tertiary" onClick={onClose}>Close</Button>
-          {!loading && !loadError && (
+          {!loading && !loadError && !wizardActive && (
             <Button variation="primary" onClick={handleSave} isLoading={saving} disabled={!canSave}>
               Save
             </Button>

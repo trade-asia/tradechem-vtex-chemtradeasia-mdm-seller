@@ -50,6 +50,10 @@
       "path": "/_v/mdm-seller/products/price-inventory",
       "public": true
     },
+    "sellerProductPriceInventoryStep": {
+      "path": "/_v/mdm-seller/products/price-inventory/step",
+      "public": true
+    },
     "sellerProductMediaServe": {
       "path": "/_v/mdm-seller/media",
       "public": true

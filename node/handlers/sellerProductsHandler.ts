@@ -564,34 +564,28 @@ export async function getSellerPriceInventory(ctx: ServiceContext<Clients>) {
 }
 
 // POST /_v/mdm-seller/products/price-inventory
-// Body (first save): { mdmProductId, name, refId, brandId, categoryId,
-//   taxCode?, ean?, packageWeight, packageWidth, packageHeight,
-//   packageLength, price, listPrice?, warehouseId, quantity,
-//   unlimitedQuantity }
-// Body (already linked — sellerPid/sellerSid present): only price/
-//   inventory fields are read; creation is skipped entirely.
-//
-// Creates the product+SKU in the seller's OWN VTEX account (their live
-// session token — see SellerCatalogClient's own note on why this can't run
-// as a background job), sets price/inventory on it, then saves
-// sellerPid/sellerSid + the saved values to MDM's metadata (mdm_product_id-
-// keyed — see getProductMetadata's own note on why that's always the one
-// used here, not vtex_product_id).
+// Quick-edit path for a product that ALREADY exists in the seller's own
+// catalog (sellerPid/sellerSid already on hand) — just price/inventory.
+// First-time creation no longer goes through this single call at all; it's
+// a multi-step wizard now (see runPriceInventoryStep below), since a VTEX-
+// side failure partway through (e.g. attaching media) must be independently
+// retryable rather than silently swallowed. This endpoint stays a plain
+// one-shot call because by this point the product/SKU are already proven
+// to exist — there's nothing here that benefits from step-by-step retry.
 export async function saveSellerPriceInventory(ctx: ServiceContext<Clients>) {
   ctx.status = 200
   const raw = await readBody(ctx)
   let parsed: any = {}
   try { parsed = JSON.parse(raw) } catch {}
 
-  const {
-    mdmProductId, name, refId, brandId, categoryId, taxCode, ean,
-    packageWeight, packageWidth, packageHeight, packageLength,
-    price, listPrice, warehouseId, quantity, unlimitedQuantity,
-    sellerPid, sellerSid,
-  } = parsed
+  const { mdmProductId, price, listPrice, warehouseId, quantity, unlimitedQuantity, sellerPid, sellerSid } = parsed
 
-  if (!mdmProductId || !(Number(price) > 0) || !warehouseId || (!unlimitedQuantity && !(Number(quantity) > 0))) {
-    ctx.body = { success: false, error: 'mdmProductId, a price greater than zero, warehouseId and quantity (or unlimited) are required' }
+  if (!mdmProductId || !sellerPid || !sellerSid) {
+    ctx.body = { success: false, error: 'mdmProductId, sellerPid and sellerSid are required — a new product is created via the step wizard, not this endpoint' }
+    return
+  }
+  if (!(Number(price) > 0) || !warehouseId || (!unlimitedQuantity && !(Number(quantity) > 0))) {
+    ctx.body = { success: false, error: 'A price greater than zero, warehouseId and quantity (or unlimited) are required' }
     return
   }
 
@@ -599,119 +593,18 @@ export async function saveSellerPriceInventory(ctx: ServiceContext<Clients>) {
   if (!auth) return
 
   const userToken = (ctx.vtex as any)?.adminUserAuthToken
-
-  let newSellerPid = sellerPid ? String(sellerPid) : undefined
-  let newSellerSid = sellerSid ? String(sellerSid) : undefined
-  let mediaError: string | undefined
-
-  if (!newSellerPid || !newSellerSid) {
-    if (!name || !brandId || !categoryId || !(Number(packageWeight) > 0) || !(Number(packageWidth) > 0) || !(Number(packageHeight) > 0) || !(Number(packageLength) > 0)) {
-      ctx.body = { success: false, error: 'name, brand, category and all package dimensions are required to create this product' }
-      return
-    }
-    try {
-      // Confirmed live 2026-10-22 against VTEX's own published OpenAPI
-      // schema (github.com/vtex/openapi-schemas, "VTEX - Catalog API Seller
-      // Portal.json") — this replaces the earlier guessed flat shape, which
-      // VTEX rejected for missing skus/slug/status/categoryIds entirely.
-      // Real required fields: status, name, brandId, categoryIds (array),
-      // specs/attributes/images (arrays, empty is fine — no minItems),
-      // slug, skus (array, one entry here), origin. SKU weight is grams as
-      // an integer per the schema ("lighter than 1000 g"); our form
-      // collects kg like the rest of this app's dimension fields, so it's
-      // converted here.
-      const slug = `/${String(name).toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-+|-+$)/g, '')}`
-      const created = await ctx.clients.sellerCatalog.createProduct({
-        status: 'active',
-        name,
-        brandId: String(brandId),
-        categoryIds: [String(categoryId)],
-        specs: [],
-        attributes: [],
-        slug,
-        images: [],
-        externalId: refId || undefined,
-        taxCode: taxCode || undefined,
-        // origin is this seller's own account — VTEX won't let a product
-        // whose origin is "marketplace" be altered, so it must be set to
-        // us, not left to default.
-        origin: ctx.vtex.account,
-        skus: [{
-          name,
-          isActive: true,
-          externalId: refId || undefined,
-          ean: ean || undefined,
-          weight: Math.round(Number(packageWeight) * 1000),
-          dimensions: {
-            width: Number(packageWidth),
-            height: Number(packageHeight),
-            length: Number(packageLength),
-          },
-          specs: null, // nullable when there's only one SKU, per the schema
-          images: [],
-        }],
-      }, userToken)
-      const ids = extractSellerIds(created)
-      if (!ids.sellerPid || !ids.sellerSid) {
-        ctx.body = {
-          success: false,
-          error: "VTEX created the product but didn't return a recognizable product/SKU id",
-          detail: (() => { try { return JSON.stringify(created) } catch { return String(created) } })(),
-        }
-        return
-      }
-      newSellerPid = ids.sellerPid
-      newSellerSid = ids.sellerSid
-    } catch (err: any) {
-      ctx.body = { success: false, error: "VTEX rejected creating this product in your catalog", detail: vtexErrDetail(err) }
-      return
-    }
-
-    // Best-effort — attach the product's current MDM media to the newly
-    // created SKU, right in this same Save action (per the client's
-    // explicit direction 2026-10-23: Save attaches media, not a separate
-    // step; the Media tab's own Sync button only ever refreshes what's
-    // shown there, never attaches anything itself). Only runs here, on a
-    // fresh creation — once linked, the Media tab disappears from the
-    // modal entirely like the other creation-only tabs, by design, so
-    // there's no later re-attach path. Re-fetches MDM media live rather
-    // than trusting whatever the modal last displayed, so this reflects
-    // whatever the seller most recently synced/edited, not stale state.
-    // A failure here never fails the save itself — the product/SKU already
-    // exist and that's what matters most.
-    try {
-      const mediaItems = await withAuthRetry(ctx, auth, a => ctx.clients.mdm.getProductMediaByMdmId(a.token, mdmProductId, a.vtexSellerId))
-      for (const item of mediaItems) {
-        if (!item?.url) continue
-        try {
-          await ctx.clients.sellerCatalog.attachSkuImage(Number(newSellerSid), item.url, item.alt || name, !!item.is_main, userToken)
-        } catch (err: any) {
-          mediaError = vtexErrDetail(err)
-        }
-      }
-    } catch (err: any) {
-      mediaError = mdmErrDetail(err)
-    }
-  }
-
-  const skuId = Number(newSellerSid)
+  const skuId = Number(sellerSid)
   try {
     await ctx.clients.sellerPricing.setPrice(skuId, Number(price), Number(listPrice) || undefined, userToken)
     await ctx.clients.sellerCatalog.setInventory(skuId, String(warehouseId), Number(quantity) || 0, !!unlimitedQuantity, userToken)
   } catch (err: any) {
-    ctx.body = {
-      success: false,
-      error: 'The product was created, but VTEX rejected the price/inventory update',
-      detail: vtexErrDetail(err),
-      sellerPid: newSellerPid,
-      sellerSid: newSellerSid,
-    }
+    ctx.body = { success: false, error: 'VTEX rejected the price/inventory update', detail: vtexErrDetail(err) }
     return
   }
 
   const record: PriceInventoryRecord = {
-    sellerPid: newSellerPid,
-    sellerSid: newSellerSid,
+    sellerPid: String(sellerPid),
+    sellerSid: String(sellerSid),
     price: Number(price),
     listPrice: Number(listPrice) || null,
     warehouseId: String(warehouseId),
@@ -720,11 +613,6 @@ export async function saveSellerPriceInventory(ctx: ServiceContext<Clients>) {
     updatedAt: new Date().toISOString(),
   }
 
-  // A failure here never fails the save itself (the VTEX writes above
-  // already succeeded and are what actually matters) — it just means the
-  // next modal open won't find this record and will offer to create the
-  // product again, so it's worth retrying rather than swallowing silently,
-  // but shouldn't block reporting success on the part that counts.
   let metadataError: string | undefined
   try {
     const current = (await withAuthRetry(ctx, auth, a => ctx.clients.mdm.getProductMetadata(a.token, mdmProductId))) ?? {}
@@ -733,7 +621,220 @@ export async function saveSellerPriceInventory(ctx: ServiceContext<Clients>) {
     metadataError = mdmErrDetail(err)
   }
 
-  ctx.body = { success: true, sellerPid: newSellerPid, sellerSid: newSellerSid, metadataError, mediaError }
+  ctx.body = { success: true, sellerPid: String(sellerPid), sellerSid: String(sellerSid), metadataError }
+}
+
+function safeJson(v: any): string {
+  try { return JSON.stringify(v) } catch { return String(v) }
+}
+
+// POST /_v/mdm-seller/products/price-inventory/step
+// Body: { step, mdmProductId, ...fields the given step needs }
+// steps, in order: media-check → product → media-attach → price →
+// inventory → finalize. Each one is its own independent call so the
+// frontend (PriceInventoryModal.js) can run them as a retryable chain,
+// matching the marketplace admin app's own Import/Link step-wizard pattern
+// (2026-10-23, explicit instruction) — nothing here is best-effort; a
+// failure at any step halts the chain and the frontend shows a Retry for
+// that step alone, re-sending sellerPid/sellerSid once the product step has
+// actually succeeded so a retry never tries to recreate it.
+export async function runPriceInventoryStep(ctx: ServiceContext<Clients>) {
+  ctx.status = 200
+  const raw = await readBody(ctx)
+  let body: any = {}
+  try { body = JSON.parse(raw) } catch {}
+
+  const { step, mdmProductId } = body
+  if (!step || !mdmProductId) {
+    ctx.body = { success: false, error: 'step and mdmProductId are required' }
+    return
+  }
+
+  const auth = await mdmAuth(ctx)
+  if (!auth) return
+  const userToken = (ctx.vtex as any)?.adminUserAuthToken
+
+  try {
+    if (step === 'media-check') {
+      // Download-validate only (can we fetch the bytes from MDM's URL) —
+      // if anything here fails, the product must never be created at all
+      // (2026-10-23, explicit instruction).
+      let mediaItems: any[] = []
+      try {
+        mediaItems = await withAuthRetry(ctx, auth, a => ctx.clients.mdm.getProductMediaByMdmId(a.token, mdmProductId, a.vtexSellerId))
+      } catch (err: any) {
+        ctx.body = { success: false, error: "Couldn't check this product's media in MDM", detail: mdmErrDetail(err) }
+        return
+      }
+      if (mediaItems.length === 0) {
+        ctx.body = { success: false, error: 'At least one product image is required in MDM before this product can be created.' }
+        return
+      }
+      for (const item of mediaItems) {
+        if (!item?.url) continue
+        try {
+          const res = await fetch(item.url)
+          if (!res.ok) {
+            ctx.body = { success: false, error: `Couldn't download a product image (HTTP ${res.status})`, detail: item.url }
+            return
+          }
+        } catch (err: any) {
+          ctx.body = { success: false, error: "Couldn't download a product image", detail: `${item.url} — ${err?.message ?? 'unknown error'}` }
+          return
+        }
+      }
+      ctx.body = { success: true, mediaCount: mediaItems.length }
+      return
+    }
+
+    if (step === 'product') {
+      const { sellerPid, sellerSid, name, refId, brandId, categoryId, taxCode, ean, packageWeight, packageWidth, packageHeight, packageLength } = body
+      // Idempotent: once this has actually succeeded once, a retry of a
+      // LATER step re-sends these same ids rather than recreating anything.
+      if (sellerPid && sellerSid) {
+        ctx.body = { success: true, sellerPid: String(sellerPid), sellerSid: String(sellerSid) }
+        return
+      }
+      if (!name || !brandId || !categoryId || !(Number(packageWeight) > 0) || !(Number(packageWidth) > 0) || !(Number(packageHeight) > 0) || !(Number(packageLength) > 0)) {
+        ctx.body = { success: false, error: 'name, brand, category and all package dimensions are required to create this product' }
+        return
+      }
+      try {
+        // See createProduct's own note for the confirmed schema this
+        // payload is built against.
+        const slug = `/${String(name).toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-+|-+$)/g, '')}`
+        const created = await ctx.clients.sellerCatalog.createProduct({
+          status: 'active',
+          name,
+          brandId: String(brandId),
+          categoryIds: [String(categoryId)],
+          specs: [],
+          attributes: [],
+          slug,
+          images: [],
+          externalId: refId || undefined,
+          taxCode: taxCode || undefined,
+          origin: ctx.vtex.account,
+          skus: [{
+            name,
+            isActive: true,
+            externalId: refId || undefined,
+            ean: ean || undefined,
+            weight: Math.round(Number(packageWeight) * 1000),
+            dimensions: {
+              width: Number(packageWidth),
+              height: Number(packageHeight),
+              length: Number(packageLength),
+            },
+            specs: null,
+            images: [],
+          }],
+        }, userToken)
+        const ids = extractSellerIds(created)
+        if (!ids.sellerPid || !ids.sellerSid) {
+          ctx.body = { success: false, error: "VTEX created the product but didn't return a recognizable product/SKU id", detail: safeJson(created) }
+          return
+        }
+        ctx.body = { success: true, sellerPid: ids.sellerPid, sellerSid: ids.sellerSid }
+      } catch (err: any) {
+        ctx.body = { success: false, error: 'VTEX rejected creating this product in your catalog', detail: vtexErrDetail(err) }
+      }
+      return
+    }
+
+    if (step === 'media-attach') {
+      const { sellerSid, name } = body
+      if (!sellerSid) { ctx.body = { success: false, error: 'sellerSid is required' }; return }
+      let mediaItems: any[] = []
+      try {
+        mediaItems = await withAuthRetry(ctx, auth, a => ctx.clients.mdm.getProductMediaByMdmId(a.token, mdmProductId, a.vtexSellerId))
+      } catch (err: any) {
+        ctx.body = { success: false, error: "Couldn't load this product's media from MDM", detail: mdmErrDetail(err) }
+        return
+      }
+      if (mediaItems.length === 0) {
+        ctx.body = { success: false, error: 'No media found in MDM for this product.' }
+        return
+      }
+      // Skip whatever already made it onto the SKU on a previous attempt —
+      // retrying this step must not attach duplicates of images that
+      // already succeeded.
+      let existingNames = new Set<string>()
+      try {
+        const existing = await ctx.clients.sellerCatalog.listSkuImages(Number(sellerSid), userToken)
+        existingNames = new Set((existing ?? []).map((f: any) => f?.Name).filter(Boolean))
+      } catch {
+        // Couldn't check — proceed and attempt all; worst case a duplicate.
+      }
+      for (const item of mediaItems) {
+        if (!item?.url) continue
+        const imgName = item.alt || name || 'Product image'
+        if (existingNames.has(imgName)) continue
+        try {
+          await ctx.clients.sellerCatalog.attachSkuImage(Number(sellerSid), item.url, imgName, !!item.is_main, userToken)
+        } catch (err: any) {
+          ctx.body = { success: false, error: "VTEX rejected attaching this product's media", detail: vtexErrDetail(err) }
+          return
+        }
+      }
+      ctx.body = { success: true }
+      return
+    }
+
+    if (step === 'price') {
+      const { sellerSid, price, listPrice } = body
+      if (!sellerSid || !(Number(price) > 0)) { ctx.body = { success: false, error: 'sellerSid and a price greater than zero are required' }; return }
+      try {
+        await ctx.clients.sellerPricing.setPrice(Number(sellerSid), Number(price), Number(listPrice) || undefined, userToken)
+        ctx.body = { success: true }
+      } catch (err: any) {
+        ctx.body = { success: false, error: 'VTEX rejected setting the price', detail: vtexErrDetail(err) }
+      }
+      return
+    }
+
+    if (step === 'inventory') {
+      const { sellerSid, warehouseId, quantity, unlimitedQuantity } = body
+      if (!sellerSid || !warehouseId || (!unlimitedQuantity && !(Number(quantity) > 0))) {
+        ctx.body = { success: false, error: 'sellerSid, warehouseId and quantity (or unlimited) are required' }
+        return
+      }
+      try {
+        await ctx.clients.sellerCatalog.setInventory(Number(sellerSid), String(warehouseId), Number(quantity) || 0, !!unlimitedQuantity, userToken)
+        ctx.body = { success: true }
+      } catch (err: any) {
+        ctx.body = { success: false, error: 'VTEX rejected setting inventory', detail: vtexErrDetail(err) }
+      }
+      return
+    }
+
+    if (step === 'finalize') {
+      const { sellerPid, sellerSid, price, listPrice, warehouseId, quantity, unlimitedQuantity } = body
+      if (!sellerPid || !sellerSid) { ctx.body = { success: false, error: 'sellerPid and sellerSid are required' }; return }
+      const record: PriceInventoryRecord = {
+        sellerPid: String(sellerPid),
+        sellerSid: String(sellerSid),
+        price: Number(price),
+        listPrice: Number(listPrice) || null,
+        warehouseId: String(warehouseId),
+        quantity: unlimitedQuantity ? null : Number(quantity),
+        unlimitedQuantity: !!unlimitedQuantity,
+        updatedAt: new Date().toISOString(),
+      }
+      try {
+        const current = (await withAuthRetry(ctx, auth, a => ctx.clients.mdm.getProductMetadata(a.token, mdmProductId))) ?? {}
+        await withAuthRetry(ctx, auth, a => ctx.clients.mdm.setProductMetadata(a.token, mdmProductId, { ...current, vtexPriceInventory: record }))
+        ctx.body = { success: true }
+      } catch (err: any) {
+        ctx.body = { success: false, error: 'Failed to save this to MDM', detail: mdmErrDetail(err) }
+      }
+      return
+    }
+
+    ctx.body = { success: false, error: `Unknown step: ${step}` }
+  } catch (err: any) {
+    ctx.body = { success: false, error: 'Unexpected error', detail: err?.message ?? String(err) }
+  }
 }
 
 // POST /_v/mdm-seller/products/unpublish?mdmProductId=... — flips an Active

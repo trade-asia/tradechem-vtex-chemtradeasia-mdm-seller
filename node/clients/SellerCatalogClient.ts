@@ -97,11 +97,20 @@ export class SellerCatalogClient extends ExternalClient {
   // (VTEX fetches it server-side), unlike the Seller Portal product-create
   // payload's `images` field, which demands an already-vtexassets.com-
   // hosted URL. Same endpoint/shape the marketplace app's own
-  // attachSkuImage already uses successfully. Not yet confirmed live
-  // whether this classic endpoint works against a SKU created via the
-  // newer Seller Portal API — different API family, never tested together
-  // before this — so treat this as best-confidence pending the first
-  // real attempt, same as everything else new in this file.
+  // attachSkuImage already uses successfully.
+  //
+  // Confirmed live 2026-10-23: 403 against a SKU created via the Seller
+  // Portal API, immediately after creation, with the same user token that
+  // successfully created that product. Ruled out as a License Manager role
+  // gap (2026-10-23): the user manually attached the same image through
+  // VTEX's own admin UI, logged in as that same seller user, and it worked —
+  // so this user does have whatever permission this endpoint needs. Most
+  // likely explanation now: a propagation delay between the Seller Portal
+  // API creating the SKU and the classic Catalog API being able to act on
+  // it yet. This is why the attach step is independently retryable in the
+  // save wizard (sellerProductsHandler.ts's runPriceInventoryStep) rather
+  // than a one-shot call — a retry a few seconds later should succeed even
+  // without any account-side change.
   public async attachSkuImage(
     skuId: number,
     url: string,
@@ -114,6 +123,16 @@ export class SellerCatalogClient extends ExternalClient {
       { Name: name, Url: url, IsMain: isMain },
       { headers: this.userHeaders(userToken) }
     )
+  }
+
+  // Lists files already attached to a SKU — confirmed schema from VTEX's
+  // own OpenAPI file: array of {Id, Name, IsMain, Url, ...}. Used by the
+  // media-attach step to skip images that already made it onto the SKU on
+  // a previous attempt, so retrying this step after a partial failure
+  // doesn't attach duplicates of the ones that already succeeded.
+  public async listSkuImages(skuId: number, userToken?: string): Promise<any[]> {
+    const res: any = await this.http.get(`/api/catalog/pvt/stockkeepingunit/${skuId}/file`, { headers: this.userHeaders(userToken) })
+    return Array.isArray(res) ? res : []
   }
 
   public async listWarehouses(userToken?: string): Promise<any[]> {
