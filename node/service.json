@@ -54,6 +54,10 @@
       "path": "/_v/mdm-seller/products/price-inventory/step",
       "public": true
     },
+    "sellerProductMediaProxy": {
+      "path": "/_v/mdm-seller/products/media-proxy",
+      "public": true
+    },
     "sellerProductMediaServe": {
       "path": "/_v/mdm-seller/media",
       "public": true

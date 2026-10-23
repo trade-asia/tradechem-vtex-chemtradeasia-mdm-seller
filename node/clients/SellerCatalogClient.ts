@@ -100,11 +100,16 @@ export class SellerCatalogClient extends ExternalClient {
   // account type, even on retry — root-caused by capturing the Seller
   // Portal's own native "Add images" screen's Network tab: it never calls
   // that endpoint at all. It uploads bytes via Catalog Images' saveImage
-  // GraphQL mutation (see sellerProductsHandler.ts's uploadSellerImage)
-  // BEFORE the product is created, then references the result by id in the
-  // product-create payload itself — there is no separate "attach to an
-  // existing SKU" step in this account type's real flow. Removed rather
-  // than kept as dead code.
+  // GraphQL mutation BEFORE the product is created, then references the
+  // result by id in the product-create payload itself — there is no
+  // separate "attach to an existing SKU" step in this account type's real
+  // flow. Removed rather than kept as dead code.
+  //
+  // That upload itself doesn't live in this client either — a server-side
+  // call to it consistently failed live (TLS connection dropped before any
+  // response, every attempt), so it now runs in the browser instead; see
+  // PriceInventoryModal.js's own note and the media-proxy route in
+  // sellerProductsHandler.ts.
 
   public async listWarehouses(userToken?: string): Promise<any[]> {
     const res: any = await this.http.get('/api/logistics/pvt/configuration/warehouses', { headers: this.userHeaders(userToken) })

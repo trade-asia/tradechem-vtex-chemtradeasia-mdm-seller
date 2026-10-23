@@ -1,6 +1,6 @@
 import { Service, ServiceContext, ParamsContext, RecorderState, method } from '@vtex/api'
 import { Clients } from './clients'
-import { getSellerProducts, getSellerCountries, listSellerProducts, getSellerProductMedia, addSellerProductMedia, deleteSellerProductMedia, importSellerProducts, exportSellerProducts, getSellerPriceInventory, saveSellerPriceInventory, runPriceInventoryStep, serveSellerProductMedia, unpublishSellerProduct, getSellerEditLink, getSellerAddLink, getVtexProductStatusHandler } from './handlers/sellerProductsHandler'
+import { getSellerProducts, getSellerCountries, listSellerProducts, getSellerProductMedia, addSellerProductMedia, deleteSellerProductMedia, importSellerProducts, exportSellerProducts, getSellerPriceInventory, saveSellerPriceInventory, runPriceInventoryStep, proxySellerMediaDownload, serveSellerProductMedia, unpublishSellerProduct, getSellerEditLink, getSellerAddLink, getVtexProductStatusHandler } from './handlers/sellerProductsHandler'
 import { getSellerDocuments, uploadSellerDocument, deleteSellerDocument } from './handlers/sellerDocumentsHandler'
 import { devReadSettings, devSaveSettings, devDeleteSettings } from './handlers/devSettingsHandler'
 import { catalogCapture, manualCapture, listMyProducts, captureEventLog, inspectProduct } from './handlers/productCaptureHandler'
@@ -46,6 +46,7 @@ export default new Service<Clients, State, ParamsContext>({
     sellerProductsExport: method({ GET: [exportSellerProducts] }),
     sellerProductPriceInventory: method({ GET: [getSellerPriceInventory], POST: [saveSellerPriceInventory] }),
     sellerProductPriceInventoryStep: method({ POST: [runPriceInventoryStep] }),
+    sellerProductMediaProxy: method({ GET: [proxySellerMediaDownload] }),
     sellerProductMediaServe: method({ GET: [serveSellerProductMedia] }),
     sellerDocuments: method({ GET: [getSellerDocuments], POST: [uploadSellerDocument] }),
     sellerDocumentDelete: method({ POST: [deleteSellerDocument] }),

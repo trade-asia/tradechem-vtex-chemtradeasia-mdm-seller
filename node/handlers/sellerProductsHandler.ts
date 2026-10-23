@@ -628,32 +628,63 @@ function safeJson(v: any): string {
   try { return JSON.stringify(v) } catch { return String(v) }
 }
 
-function guessImageExt(contentType: string, url: string): string {
-  const ct = (contentType || '').toLowerCase()
-  if (ct.includes('png')) return '.png'
-  if (ct.includes('gif')) return '.gif'
-  if (ct.includes('webp')) return '.webp'
-  if (ct.includes('jpeg') || ct.includes('jpg')) return '.jpg'
-  const m = url.match(/\.(jpe?g|png|gif|webp)(?:[?#]|$)/i)
-  return m ? `.${m[1].toLowerCase()}` : '.jpg'
-}
+// GET /_v/mdm-seller/products/media-proxy?url=<encoded MDM image URL>
+// Downloads an MDM-hosted image server-side and re-serves its bytes from
+// this app's own origin. Used by the Price & Inventory wizard's "Uploading
+// media" step (see PriceInventoryModal.js) so the browser can fetch the
+// bytes without a cross-origin request to MDM's media host — that step's
+// own upload-to-VTEX call runs in the browser now, not here (see that
+// file's own note on why: uploading from this backend to VTEX's private
+// Catalog Images endpoint consistently failed live 2026-10-23 with "Client
+// network socket disconnected before secure TLS connection was
+// established" — a connection dropped before any HTTP response, every
+// single attempt, not a transient blip retries could paper over. That
+// route is only reachable the way VTEX's own admin UI reaches it: a real,
+// same-origin browser request. Downloading FROM MDM server-side was never
+// the problem, so this proxy step stays server-side.)
+export async function proxySellerMediaDownload(ctx: ServiceContext<Clients>) {
+  const url = (ctx.query as any).url as string | undefined
+  if (!url) {
+    ctx.status = 400
+    ctx.body = 'url is required'
+    return
+  }
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    ctx.status = 400
+    ctx.body = 'Invalid url'
+    return
+  }
+  const host = parsed.hostname.toLowerCase()
+  const isPrivate = host === 'localhost' || host.startsWith('127.') || host.startsWith('10.')
+    || host.startsWith('192.168.') || host.startsWith('169.254.') || host === '0.0.0.0'
+  if (parsed.protocol !== 'https:' || isPrivate) {
+    ctx.status = 400
+    ctx.body = 'url must be a public https URL'
+    return
+  }
 
-// Uploads one image's bytes to VTEX's own Catalog Images app — see
-// SellerImageUploadClient.ts for the actual call and why it's a proper
-// ExternalClient (gets this app's default retry/timeout handling) rather
-// than the raw axios.post() this started as. Confirmed live 2026-10-23 the
-// raw version could intermittently fail with "Client network socket
-// disconnected before secure TLS connection was established" — a bare
-// TLS-handshake drop, exactly the class of transient error a managed VTEX
-// IO client retries past on its own.
-async function uploadSellerImage(
-  ctx: ServiceContext<Clients>,
-  filename: string,
-  data: Buffer,
-  contentType: string,
-  userToken?: string
-): Promise<{ id: string; url: string }> {
-  return ctx.clients.sellerImageUpload.uploadImage(filename, data, contentType, userToken)
+  const auth = await mdmAuth(ctx)
+  if (!auth) return
+
+  try {
+    const res = await fetch(url)
+    if (!res.ok) {
+      ctx.status = res.status
+      ctx.body = `Upstream returned HTTP ${res.status}`
+      return
+    }
+    const buf = Buffer.from(await res.arrayBuffer())
+    ctx.status = 200
+    ctx.set('Content-Type', res.headers.get('content-type') || 'application/octet-stream')
+    ctx.set('Cache-Control', 'private, max-age=300')
+    ctx.body = buf
+  } catch (err: any) {
+    ctx.status = 502
+    ctx.body = `Failed to download image: ${err?.message ?? 'unknown error'}`
+  }
 }
 
 // POST /_v/mdm-seller/products/price-inventory/step
@@ -666,6 +697,11 @@ async function uploadSellerImage(
 // the frontend shows a Retry for that step alone, re-sending
 // sellerPid/sellerSid (and the uploaded image list) once the earlier steps
 // actually succeeded so a retry never tries to recreate it.
+//
+// NOTE: the 'media' step itself is NOT handled here (2026-10-23) — it runs
+// entirely in the browser now (see PriceInventoryModal.js). The frontend
+// calls this endpoint directly for 'product'/'price'/'inventory'/
+// 'finalize' only, after it already has the uploaded image list in hand.
 export async function runPriceInventoryStep(ctx: ServiceContext<Clients>) {
   ctx.status = 200
   const raw = await readBody(ctx)
@@ -683,65 +719,6 @@ export async function runPriceInventoryStep(ctx: ServiceContext<Clients>) {
   const userToken = (ctx.vtex as any)?.adminUserAuthToken
 
   try {
-    if (step === 'media') {
-      // Confirmed live 2026-10-23 (captured from the Seller Portal's own
-      // native "Add images" screen's Network tab): VTEX's real flow
-      // uploads each image's bytes FIRST, independently, via Catalog
-      // Images' saveImage GraphQL mutation — getting back a URL already
-      // hosted on {account}.vtexassets.com — and only THEN creates the
-      // product, referencing those already-uploaded images by id. The
-      // native screen just makes this look like one atomic "create
-      // product" step. This replaces an earlier, wrong approach (create
-      // product first, attach media after via the classic Catalog API's
-      // SKU-file endpoint) — that endpoint 403s persistently for this
-      // Seller Portal account type regardless of retries, because it's
-      // simply not the mechanism this account type uses; this one is.
-      //
-      // Runs BEFORE the product even exists — if any image fails to
-      // download or upload, nothing is created at all (2026-10-23,
-      // explicit instruction).
-      let mediaItems: any[] = []
-      try {
-        mediaItems = await withAuthRetry(ctx, auth, a => ctx.clients.mdm.getProductMediaByMdmId(a.token, mdmProductId, a.vtexSellerId))
-      } catch (err: any) {
-        ctx.body = { success: false, error: "Couldn't check this product's media in MDM", detail: mdmErrDetail(err) }
-        return
-      }
-      if (mediaItems.length === 0) {
-        ctx.body = { success: false, error: 'At least one product image is required in MDM before this product can be created.' }
-        return
-      }
-      // The main/featured image goes first — the Seller Portal API's own
-      // images arrays carry no separate IsMain flag; position is all it
-      // has.
-      const ordered = [...mediaItems].sort((a, b) => (b?.is_main ? 1 : 0) - (a?.is_main ? 1 : 0))
-      const uploaded: { id: string; url: string; alt?: string }[] = []
-      for (const item of ordered) {
-        if (!item?.url) continue
-        let bytes: Buffer
-        let contentType = 'image/jpeg'
-        try {
-          const res = await fetch(item.url)
-          if (!res.ok) throw new Error(`HTTP ${res.status}`)
-          contentType = res.headers.get('content-type') || contentType
-          bytes = Buffer.from(await res.arrayBuffer())
-        } catch (err: any) {
-          ctx.body = { success: false, error: "Couldn't download a product image", detail: `${item.url} — ${err?.message ?? 'unknown error'}` }
-          return
-        }
-        const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${guessImageExt(contentType, item.url)}`
-        try {
-          const up = await uploadSellerImage(ctx, filename, bytes, contentType, userToken)
-          uploaded.push({ id: up.id, url: up.url, alt: item.alt || undefined })
-        } catch (err: any) {
-          ctx.body = { success: false, error: "VTEX rejected uploading this product's media", detail: err?.message ?? String(err) }
-          return
-        }
-      }
-      ctx.body = { success: true, images: uploaded }
-      return
-    }
-
     if (step === 'product') {
       const { sellerPid, sellerSid, name, refId, brandId, categoryId, taxCode, ean, packageWeight, packageWidth, packageHeight, packageLength, images } = body
       // Idempotent: once this has actually succeeded once, a retry of a

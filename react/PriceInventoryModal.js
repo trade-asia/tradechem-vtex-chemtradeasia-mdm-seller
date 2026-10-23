@@ -4,6 +4,68 @@ import { Modal, Button, Input, Dropdown, Spinner, Alert } from 'vtex.styleguide'
 
 const BASE = '/_v/mdm-seller'
 
+// The media-upload step runs entirely in THIS browser tab, not on our own
+// backend (2026-10-23). Uploading from our Node backend to VTEX's private
+// Catalog Images endpoint consistently failed live with "Client network
+// socket disconnected before secure TLS connection was established" — a
+// connection dropped before any HTTP response, every single attempt, not a
+// transient blip a retry could fix. That endpoint is only reliably
+// reachable the way VTEX's own admin UI reaches it: a real, same-origin
+// browser request (this page is already served from {account}.myvtex.com,
+// same origin as that endpoint). Downloading the image bytes from MDM
+// still happens server-side first (via /products/media-proxy) so the
+// browser never has to fetch MDM's media host directly, which could hit a
+// cross-origin (CORS) wall MDM's host was never set up to allow.
+const SAVE_IMAGE_PERSISTED_HASH = 'b5ba21c6bc3fc0182305c88284ade93b9db77a770e5c3ff6ed743b9b7463ae81'
+
+const guessImageExt = (contentType, url) => {
+  const ct = (contentType || '').toLowerCase()
+  if (ct.includes('png')) return '.png'
+  if (ct.includes('gif')) return '.gif'
+  if (ct.includes('webp')) return '.webp'
+  if (ct.includes('jpeg') || ct.includes('jpg')) return '.jpg'
+  const m = (url || '').match(/\.(jpe?g|png|gif|webp)(?:[?#]|$)/i)
+  return m ? `.${m[1].toLowerCase()}` : '.jpg'
+}
+
+// Downloads one MDM image (via our own same-origin proxy) and uploads it
+// to VTEX's Catalog Images app, returning {id, url} already hosted on
+// {account}.vtexassets.com — same GraphQL mutation the Seller Portal's own
+// native "Add images" screen uses (captured live from its Network tab).
+const uploadMediaItemInBrowser = async (item, defaultAlt) => {
+  const proxyRes = await fetch(`${BASE}/products/media-proxy?url=${encodeURIComponent(item.url)}`)
+  if (!proxyRes.ok) throw new Error(`Couldn't download a product image (HTTP ${proxyRes.status})`)
+  const blob = await proxyRes.blob()
+  const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${guessImageExt(blob.type, item.url)}`
+
+  const operations = JSON.stringify({
+    operationName: 'saveImage',
+    variables: { filename, file: null },
+    extensions: {
+      persistedQuery: {
+        version: 1,
+        sha256Hash: SAVE_IMAGE_PERSISTED_HASH,
+        sender: 'vtex.admin-catalog@2.x',
+        provider: 'vtex.catalog-images@0.x',
+      },
+    },
+  })
+  const formData = new FormData()
+  formData.append('operations', operations)
+  formData.append('map', JSON.stringify({ '0': ['variables.file'] }))
+  formData.append('0', blob, filename)
+
+  const uploadRes = await fetch(
+    '/_v/private/graphql/v1?workspace=master&maxAge=long&appsEtag=remove&domain=admin&locale=en-US',
+    { method: 'POST', body: formData }
+  )
+  const uploadData = await uploadRes.json().catch(() => null)
+  if (uploadData?.errors?.length) throw new Error(uploadData.errors.map(e => e.message).join('; '))
+  const result = uploadData?.data?.saveImage
+  if (!result?.fullUrl || !result?.id) throw new Error("VTEX's image upload didn't return a usable URL")
+  return { id: result.id, url: result.fullUrl, alt: item.alt || defaultAlt }
+}
+
 const parseResponse = async (res) => {
   const text = await res.text()
   try { return JSON.parse(text) } catch {
@@ -266,7 +328,28 @@ const PriceInventoryModal = ({ product, onClose }) => {
 
       let data
       if (step === 'media') {
-        data = await callStep('media', {})
+        // Runs entirely in this browser tab — see this file's own note
+        // (near SAVE_IMAGE_PERSISTED_HASH) on why the upload itself can't
+        // run on our backend. Re-fetches MDM's media list fresh rather
+        // than trusting the (preview-only) mediaItems state.
+        try {
+          const mediaRes = await fetch(`${BASE}/products/media?mdmProductId=${encodeURIComponent(product.id)}`)
+          const mediaData = await parseResponse(mediaRes)
+          if (!mediaData.success) throw new Error(mediaData.detail ? `${mediaData.error}: ${mediaData.detail}` : mediaData.error)
+          const items = mediaData.media ?? []
+          if (items.length === 0) throw new Error('At least one product image is required in MDM before this product can be created.')
+          // Main/featured image first — the Seller Portal API's own images
+          // arrays carry no separate IsMain flag; position is all it has.
+          const ordered = [...items].sort((a, b) => (b.is_main ? 1 : 0) - (a.is_main ? 1 : 0))
+          const uploadedList = []
+          for (const item of ordered) {
+            if (!item?.url) continue
+            uploadedList.push(await uploadMediaItemInBrowser(item, product.name))
+          }
+          data = { success: true, images: uploadedList }
+        } catch (err) {
+          data = { success: false, error: err.message }
+        }
         if (data.success) {
           imagesLocal = data.images
           setUploadedImages(data.images)
