@@ -628,15 +628,104 @@ function safeJson(v: any): string {
   try { return JSON.stringify(v) } catch { return String(v) }
 }
 
+function guessImageExt(contentType: string, url: string): string {
+  const ct = (contentType || '').toLowerCase()
+  if (ct.includes('png')) return '.png'
+  if (ct.includes('gif')) return '.gif'
+  if (ct.includes('webp')) return '.webp'
+  if (ct.includes('jpeg') || ct.includes('jpg')) return '.jpg'
+  const m = url.match(/\.(jpe?g|png|gif|webp)(?:[?#]|$)/i)
+  return m ? `.${m[1].toLowerCase()}` : '.jpg'
+}
+
+function buildMultipartBody(boundary: string, fields: Array<{ name: string; value?: string; filename?: string; contentType?: string; data?: Buffer }>): Buffer {
+  const parts: Buffer[] = []
+  for (const f of fields) {
+    let header = `--${boundary}\r\nContent-Disposition: form-data; name="${f.name}"`
+    if (f.filename) header += `; filename="${f.filename}"`
+    header += '\r\n'
+    if (f.contentType) header += `Content-Type: ${f.contentType}\r\n`
+    header += '\r\n'
+    parts.push(Buffer.from(header, 'utf8'))
+    parts.push(f.data ?? Buffer.from(f.value ?? '', 'utf8'))
+    parts.push(Buffer.from('\r\n', 'utf8'))
+  }
+  parts.push(Buffer.from(`--${boundary}--\r\n`, 'utf8'))
+  return Buffer.concat(parts)
+}
+
+// Uploads one image's bytes to VTEX's own Catalog Images app, via the exact
+// private GraphQL mutation the Seller Portal's native "Add images" screen
+// itself uses — captured live 2026-10-23 from its browser Network tab
+// (operation "saveImage", sender vtex.admin-catalog@2.x, provider
+// vtex.catalog-images@0.x). Returns a URL already hosted on
+// {account}.vtexassets.com, which is what the Seller Portal product API's
+// own `images` field requires. The persisted-query hash below is sent
+// without the full query text (standard Automatic Persisted Queries) —
+// safe because this is a long-published, platform-wide query used by every
+// VTEX account's admin UI, not something specific to this account that
+// could be missing from VTEX's cache.
+const SAVE_IMAGE_PERSISTED_HASH = 'b5ba21c6bc3fc0182305c88284ade93b9db77a770e5c3ff6ed743b9b7463ae81'
+async function uploadSellerImage(
+  ctx: ServiceContext<Clients>,
+  filename: string,
+  data: Buffer,
+  contentType: string,
+  userToken?: string
+): Promise<{ id: string; url: string }> {
+  const boundary = `----vtexmdm${Date.now()}${Math.random().toString(36).slice(2, 8)}`
+  const operations = JSON.stringify({
+    operationName: 'saveImage',
+    variables: { filename, file: null },
+    extensions: {
+      persistedQuery: {
+        version: 1,
+        sha256Hash: SAVE_IMAGE_PERSISTED_HASH,
+        sender: 'vtex.admin-catalog@2.x',
+        provider: 'vtex.catalog-images@0.x',
+      },
+    },
+  })
+  const map = JSON.stringify({ '0': ['variables.file'] })
+  const body = buildMultipartBody(boundary, [
+    { name: 'operations', value: operations },
+    { name: 'map', value: map },
+    { name: '0', filename, contentType, data },
+  ])
+
+  const headers: Record<string, string> = {
+    'Content-Type': `multipart/form-data; boundary=${boundary}`,
+    Accept: '*/*',
+  }
+  if (userToken) {
+    headers.VtexIdclientAutCookie = userToken
+    headers['Proxy-Authorization'] = userToken
+  }
+
+  const res = await axios.post(
+    `https://${ctx.vtex.account}.myvtex.com/_v/private/graphql/v1?workspace=master&maxAge=long&appsEtag=remove&domain=admin&locale=en-US`,
+    body,
+    { headers, maxBodyLength: Infinity, timeout: 20000 }
+  )
+  if (res.data?.errors?.length) {
+    throw new Error(res.data.errors.map((e: any) => e.message).join('; '))
+  }
+  const result = res.data?.data?.saveImage
+  if (!result?.fullUrl || !result?.id) {
+    throw new Error("VTEX's image upload didn't return a usable URL")
+  }
+  return { id: result.id, url: result.fullUrl }
+}
+
 // POST /_v/mdm-seller/products/price-inventory/step
 // Body: { step, mdmProductId, ...fields the given step needs }
-// steps, in order: media-check → product → media-attach → price →
-// inventory → finalize. Each one is its own independent call so the
-// frontend (PriceInventoryModal.js) can run them as a retryable chain,
-// matching the marketplace admin app's own Import/Link step-wizard pattern
-// (2026-10-23, explicit instruction) — nothing here is best-effort; a
-// failure at any step halts the chain and the frontend shows a Retry for
-// that step alone, re-sending sellerPid/sellerSid once the product step has
+// steps, in order: media → product → price → inventory → finalize. Each
+// one is its own independent call so the frontend (PriceInventoryModal.js)
+// can run them as a retryable chain, matching the marketplace admin app's
+// own Import/Link step-wizard pattern (2026-10-23, explicit instruction) —
+// nothing here is best-effort; a failure at any step halts the chain and
+// the frontend shows a Retry for that step alone, re-sending
+// sellerPid/sellerSid (and the uploaded image list) once the earlier steps
 // actually succeeded so a retry never tries to recreate it.
 export async function runPriceInventoryStep(ctx: ServiceContext<Clients>) {
   ctx.status = 200
@@ -655,10 +744,23 @@ export async function runPriceInventoryStep(ctx: ServiceContext<Clients>) {
   const userToken = (ctx.vtex as any)?.adminUserAuthToken
 
   try {
-    if (step === 'media-check') {
-      // Download-validate only (can we fetch the bytes from MDM's URL) —
-      // if anything here fails, the product must never be created at all
-      // (2026-10-23, explicit instruction).
+    if (step === 'media') {
+      // Confirmed live 2026-10-23 (captured from the Seller Portal's own
+      // native "Add images" screen's Network tab): VTEX's real flow
+      // uploads each image's bytes FIRST, independently, via Catalog
+      // Images' saveImage GraphQL mutation — getting back a URL already
+      // hosted on {account}.vtexassets.com — and only THEN creates the
+      // product, referencing those already-uploaded images by id. The
+      // native screen just makes this look like one atomic "create
+      // product" step. This replaces an earlier, wrong approach (create
+      // product first, attach media after via the classic Catalog API's
+      // SKU-file endpoint) — that endpoint 403s persistently for this
+      // Seller Portal account type regardless of retries, because it's
+      // simply not the mechanism this account type uses; this one is.
+      //
+      // Runs BEFORE the product even exists — if any image fails to
+      // download or upload, nothing is created at all (2026-10-23,
+      // explicit instruction).
       let mediaItems: any[] = []
       try {
         mediaItems = await withAuthRetry(ctx, auth, a => ctx.clients.mdm.getProductMediaByMdmId(a.token, mdmProductId, a.vtexSellerId))
@@ -670,25 +772,39 @@ export async function runPriceInventoryStep(ctx: ServiceContext<Clients>) {
         ctx.body = { success: false, error: 'At least one product image is required in MDM before this product can be created.' }
         return
       }
-      for (const item of mediaItems) {
+      // The main/featured image goes first — the Seller Portal API's own
+      // images arrays carry no separate IsMain flag; position is all it
+      // has.
+      const ordered = [...mediaItems].sort((a, b) => (b?.is_main ? 1 : 0) - (a?.is_main ? 1 : 0))
+      const uploaded: { id: string; url: string; alt?: string }[] = []
+      for (const item of ordered) {
         if (!item?.url) continue
+        let bytes: Buffer
+        let contentType = 'image/jpeg'
         try {
           const res = await fetch(item.url)
-          if (!res.ok) {
-            ctx.body = { success: false, error: `Couldn't download a product image (HTTP ${res.status})`, detail: item.url }
-            return
-          }
+          if (!res.ok) throw new Error(`HTTP ${res.status}`)
+          contentType = res.headers.get('content-type') || contentType
+          bytes = Buffer.from(await res.arrayBuffer())
         } catch (err: any) {
           ctx.body = { success: false, error: "Couldn't download a product image", detail: `${item.url} — ${err?.message ?? 'unknown error'}` }
           return
         }
+        const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${guessImageExt(contentType, item.url)}`
+        try {
+          const up = await uploadSellerImage(ctx, filename, bytes, contentType, userToken)
+          uploaded.push({ id: up.id, url: up.url, alt: item.alt || undefined })
+        } catch (err: any) {
+          ctx.body = { success: false, error: "VTEX rejected uploading this product's media", detail: err?.message ?? String(err) }
+          return
+        }
       }
-      ctx.body = { success: true, mediaCount: mediaItems.length }
+      ctx.body = { success: true, images: uploaded }
       return
     }
 
     if (step === 'product') {
-      const { sellerPid, sellerSid, name, refId, brandId, categoryId, taxCode, ean, packageWeight, packageWidth, packageHeight, packageLength } = body
+      const { sellerPid, sellerSid, name, refId, brandId, categoryId, taxCode, ean, packageWeight, packageWidth, packageHeight, packageLength, images } = body
       // Idempotent: once this has actually succeeded once, a retry of a
       // LATER step re-sends these same ids rather than recreating anything.
       if (sellerPid && sellerSid) {
@@ -699,9 +815,16 @@ export async function runPriceInventoryStep(ctx: ServiceContext<Clients>) {
         ctx.body = { success: false, error: 'name, brand, category and all package dimensions are required to create this product' }
         return
       }
+      const imageList: { id: string; url: string; alt?: string }[] = Array.isArray(images) ? images : []
+      if (imageList.length === 0) {
+        ctx.body = { success: false, error: 'Media must be uploaded before the product can be created — retry the media step first.' }
+        return
+      }
       try {
         // See createProduct's own note for the confirmed schema this
-        // payload is built against.
+        // payload is built against. images/skus[].images reference the
+        // already-uploaded ids from the media step above, exactly as the
+        // native Seller Portal create screen itself does.
         const slug = `/${String(name).toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-+|-+$)/g, '')}`
         const created = await ctx.clients.sellerCatalog.createProduct({
           status: 'active',
@@ -711,7 +834,7 @@ export async function runPriceInventoryStep(ctx: ServiceContext<Clients>) {
           specs: [],
           attributes: [],
           slug,
-          images: [],
+          images: imageList.map(im => ({ id: im.id, url: im.url, alt: im.alt || name })),
           externalId: refId || undefined,
           taxCode: taxCode || undefined,
           origin: ctx.vtex.account,
@@ -727,7 +850,7 @@ export async function runPriceInventoryStep(ctx: ServiceContext<Clients>) {
               length: Number(packageLength),
             },
             specs: null,
-            images: [],
+            images: imageList.map(im => im.id),
           }],
         }, userToken)
         const ids = extractSellerIds(created)
@@ -739,45 +862,6 @@ export async function runPriceInventoryStep(ctx: ServiceContext<Clients>) {
       } catch (err: any) {
         ctx.body = { success: false, error: 'VTEX rejected creating this product in your catalog', detail: vtexErrDetail(err) }
       }
-      return
-    }
-
-    if (step === 'media-attach') {
-      const { sellerSid, name } = body
-      if (!sellerSid) { ctx.body = { success: false, error: 'sellerSid is required' }; return }
-      let mediaItems: any[] = []
-      try {
-        mediaItems = await withAuthRetry(ctx, auth, a => ctx.clients.mdm.getProductMediaByMdmId(a.token, mdmProductId, a.vtexSellerId))
-      } catch (err: any) {
-        ctx.body = { success: false, error: "Couldn't load this product's media from MDM", detail: mdmErrDetail(err) }
-        return
-      }
-      if (mediaItems.length === 0) {
-        ctx.body = { success: false, error: 'No media found in MDM for this product.' }
-        return
-      }
-      // Skip whatever already made it onto the SKU on a previous attempt —
-      // retrying this step must not attach duplicates of images that
-      // already succeeded.
-      let existingNames = new Set<string>()
-      try {
-        const existing = await ctx.clients.sellerCatalog.listSkuImages(Number(sellerSid), userToken)
-        existingNames = new Set((existing ?? []).map((f: any) => f?.Name).filter(Boolean))
-      } catch {
-        // Couldn't check — proceed and attempt all; worst case a duplicate.
-      }
-      for (const item of mediaItems) {
-        if (!item?.url) continue
-        const imgName = item.alt || name || 'Product image'
-        if (existingNames.has(imgName)) continue
-        try {
-          await ctx.clients.sellerCatalog.attachSkuImage(Number(sellerSid), item.url, imgName, !!item.is_main, userToken)
-        } catch (err: any) {
-          ctx.body = { success: false, error: "VTEX rejected attaching this product's media", detail: vtexErrDetail(err) }
-          return
-        }
-      }
-      ctx.body = { success: true }
       return
     }
 

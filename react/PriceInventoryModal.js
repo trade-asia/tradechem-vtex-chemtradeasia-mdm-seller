@@ -30,14 +30,15 @@ const TABS_LINKED = ['Inventory', 'Price']
 // Step-chain wizard for first-time creation (2026-10-23, explicit
 // instruction) — matches the marketplace admin app's own Import/Link step
 // wizard: each step is independently retryable, nothing is best-effort.
-// A failure at media-attach no longer gets silently swallowed as a
-// non-blocking warning after the product already "succeeded" — the whole
-// save halts there until that step itself succeeds.
-const STEP_ORDER = ['mediaCheck', 'product', 'mediaAttach', 'price', 'inventory', 'finalize']
+// Media uploads BEFORE the product is created (confirmed live from the
+// Seller Portal's own native "Add images" screen: it uploads bytes first,
+// independently, then references the result by id when the product is
+// actually created) — so a failed upload never leaves a half-created
+// product behind, and nothing after it runs until it succeeds.
+const STEP_ORDER = ['media', 'product', 'price', 'inventory', 'finalize']
 const STEP_LABELS = {
-  mediaCheck: 'Checking media',
+  media: 'Uploading media',
   product: 'Creating product',
-  mediaAttach: 'Attaching media',
   price: 'Setting price',
   inventory: 'Setting inventory',
   finalize: 'Saving record',
@@ -97,6 +98,7 @@ const PriceInventoryModal = ({ product, onClose }) => {
   const [wizardActive, setWizardActive] = useState(false)
   const [steps, setSteps] = useState(pendingSteps())
   const [stepErrors, setStepErrors] = useState({})
+  const [uploadedImages, setUploadedImages] = useState([])
 
   const [linked, setLinked] = useState(false)
   // Set once, only from the initial load — never touched by a save in this
@@ -245,14 +247,17 @@ const PriceInventoryModal = ({ product, onClose }) => {
   }
 
   // Runs the wizard from `fromStep` onward, in order. `carry` holds
-  // sellerPid/sellerSid as known so far — null until the product step has
-  // actually succeeded once. A step failure halts the chain right there:
-  // its StepRow shows Retry, and retrying calls this again starting from
-  // that same step, carrying forward whatever already succeeded (so
-  // retrying e.g. media-attach never re-creates the product).
+  // sellerPid/sellerSid and the already-uploaded image list as known so
+  // far — empty/null until their own steps have actually succeeded once.
+  // A step failure halts the chain right there: its StepRow shows Retry,
+  // and retrying calls this again starting from that same step, carrying
+  // forward whatever already succeeded (so retrying e.g. the product step
+  // never re-uploads media, and retrying a later step never re-creates
+  // the product).
   const runChain = async (fromStep, carry) => {
     let sellerPidLocal = carry.sellerPid
     let sellerSidLocal = carry.sellerSid
+    let imagesLocal = carry.images
     const startIdx = STEP_ORDER.indexOf(fromStep)
     for (let i = startIdx; i < STEP_ORDER.length; i++) {
       const step = STEP_ORDER[i]
@@ -260,14 +265,19 @@ const PriceInventoryModal = ({ product, onClose }) => {
       setStepErrors(e => ({ ...e, [step]: null }))
 
       let data
-      if (step === 'mediaCheck') {
-        data = await callStep('media-check', {})
+      if (step === 'media') {
+        data = await callStep('media', {})
+        if (data.success) {
+          imagesLocal = data.images
+          setUploadedImages(data.images)
+        }
       } else if (step === 'product') {
         data = await callStep('product', {
           sellerPid: sellerPidLocal, sellerSid: sellerSidLocal,
           name: product.name, refId: product.sku,
           brandId, categoryId, taxCode, ean,
           packageWeight, packageWidth, packageHeight, packageLength,
+          images: imagesLocal,
         })
         if (data.success) {
           sellerPidLocal = data.sellerPid
@@ -275,8 +285,6 @@ const PriceInventoryModal = ({ product, onClose }) => {
           setSellerPid(data.sellerPid)
           setSellerSid(data.sellerSid)
         }
-      } else if (step === 'mediaAttach') {
-        data = await callStep('media-attach', { sellerSid: sellerSidLocal, name: product.name })
       } else if (step === 'price') {
         data = await callStep('price', { sellerSid: sellerSidLocal, price, listPrice })
       } else if (step === 'inventory') {
@@ -303,7 +311,7 @@ const PriceInventoryModal = ({ product, onClose }) => {
 
   const handleRetryStep = (step) => {
     setSaving(true)
-    runChain(step, { sellerPid, sellerSid })
+    runChain(step, { sellerPid, sellerSid, images: uploadedImages })
   }
 
   const handleSave = async () => {
@@ -339,7 +347,8 @@ const PriceInventoryModal = ({ product, onClose }) => {
     setWizardActive(true)
     setSteps(pendingSteps())
     setStepErrors({})
-    runChain('mediaCheck', { sellerPid: null, sellerSid: null })
+    setUploadedImages([])
+    runChain('media', { sellerPid: null, sellerSid: null, images: null })
   }
 
   return (

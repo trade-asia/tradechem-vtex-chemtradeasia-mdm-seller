@@ -86,54 +86,25 @@ export class SellerCatalogClient extends ExternalClient {
   // (array), specs/attributes/images (arrays, empty is fine), slug, skus
   // (array — this creates the product AND its first SKU in one call, no
   // separate SKU-create endpoint exists in this API family), origin.
-  // Builder lives in sellerProductsHandler.ts's saveSellerPriceInventory.
+  // Builder lives in sellerProductsHandler.ts's runPriceInventoryStep
+  // ('product' step) — images/skus[].images reference ids from the
+  // 'media' step that runs before this one.
   public async createProduct(payload: any, userToken?: string): Promise<any> {
     return this.http.post('/api/catalog-seller-portal/products', payload, { headers: this.userHeaders(userToken) })
   }
 
-  // Classic Catalog API, not the Seller Portal one — confirmed from VTEX's
-  // published schema (github.com/vtex/openapi-schemas, "VTEX - Catalog
-  // API.json") that this accepts a plain external image URL directly
-  // (VTEX fetches it server-side), unlike the Seller Portal product-create
-  // payload's `images` field, which demands an already-vtexassets.com-
-  // hosted URL. Same endpoint/shape the marketplace app's own
-  // attachSkuImage already uses successfully.
-  //
-  // Confirmed live 2026-10-23: 403 against a SKU created via the Seller
-  // Portal API, immediately after creation, with the same user token that
-  // successfully created that product. Ruled out as a License Manager role
-  // gap (2026-10-23): the user manually attached the same image through
-  // VTEX's own admin UI, logged in as that same seller user, and it worked —
-  // so this user does have whatever permission this endpoint needs. Most
-  // likely explanation now: a propagation delay between the Seller Portal
-  // API creating the SKU and the classic Catalog API being able to act on
-  // it yet. This is why the attach step is independently retryable in the
-  // save wizard (sellerProductsHandler.ts's runPriceInventoryStep) rather
-  // than a one-shot call — a retry a few seconds later should succeed even
-  // without any account-side change.
-  public async attachSkuImage(
-    skuId: number,
-    url: string,
-    name: string,
-    isMain: boolean,
-    userToken?: string
-  ): Promise<any> {
-    return this.http.post(
-      `/api/catalog/pvt/stockkeepingunit/${skuId}/file`,
-      { Name: name, Url: url, IsMain: isMain },
-      { headers: this.userHeaders(userToken) }
-    )
-  }
-
-  // Lists files already attached to a SKU — confirmed schema from VTEX's
-  // own OpenAPI file: array of {Id, Name, IsMain, Url, ...}. Used by the
-  // media-attach step to skip images that already made it onto the SKU on
-  // a previous attempt, so retrying this step after a partial failure
-  // doesn't attach duplicates of the ones that already succeeded.
-  public async listSkuImages(skuId: number, userToken?: string): Promise<any[]> {
-    const res: any = await this.http.get(`/api/catalog/pvt/stockkeepingunit/${skuId}/file`, { headers: this.userHeaders(userToken) })
-    return Array.isArray(res) ? res : []
-  }
+  // NOTE: an earlier version of this client attached SKU images via the
+  // classic Catalog API's stockkeepingunit/{skuId}/file endpoint (same
+  // shape the marketplace admin app's own attachSkuImage uses). Confirmed
+  // live 2026-10-23 that this persistently 403s for this Seller Portal
+  // account type, even on retry — root-caused by capturing the Seller
+  // Portal's own native "Add images" screen's Network tab: it never calls
+  // that endpoint at all. It uploads bytes via Catalog Images' saveImage
+  // GraphQL mutation (see sellerProductsHandler.ts's uploadSellerImage)
+  // BEFORE the product is created, then references the result by id in the
+  // product-create payload itself — there is no separate "attach to an
+  // existing SKU" step in this account type's real flow. Removed rather
+  // than kept as dead code.
 
   public async listWarehouses(userToken?: string): Promise<any[]> {
     const res: any = await this.http.get('/api/logistics/pvt/configuration/warehouses', { headers: this.userHeaders(userToken) })
