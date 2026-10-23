@@ -240,6 +240,45 @@ export async function setMarketplaceInventory(
   }
 }
 
+// Suggestions API (Received SKUs) — same api.vtex.com host as pricing
+// above, scoped to the MARKETPLACE account, never ctx.vtex.account
+// (2026-10-24: a first attempt at this used an ExternalClient keyed on
+// ctx.account, which inside this seller app resolves to the SELLER's own
+// account — silently querying the wrong account's Suggestions and always
+// coming back empty. Same cross-account mistake this whole file already
+// exists to avoid everywhere else).
+//
+// Deliberately searches the LIST by seller + RefId (confirmed-matched)
+// rather than trying to derive this seller's own SellerStockKeepingUnitId
+// from the Seller Portal Catalog API's own SKU id — those are two
+// different id spaces that aren't guaranteed to be the same number (the
+// marketplace admin app's own receivedSkuHandler.ts hit this exact
+// lesson first and reads SellerStockKeepingUnitId straight off the
+// matched suggestion instead of assuming it). seller+name narrows the
+// search; RefId is what actually confirms the match.
+export async function findMarketplaceSuggestionByRefId(
+  vtexAppKey: string,
+  vtexAppToken: string,
+  vtexSellerId: string,
+  refId: string
+): Promise<any | null> {
+  try {
+    const res = await axios.get(`${pricingBaseUrl()}/suggestions`, {
+      headers: authHeaders(vtexAppKey, vtexAppToken),
+      params: { seller: vtexSellerId, _from: 1, _to: 50 },
+      timeout: 15000,
+    })
+    const list: any[] = Array.isArray(res.data) ? res.data : (Array.isArray(res.data?.Data) ? res.data.Data : [])
+    const match = list.find((item: any) => {
+      const content = item?.Content ?? item?.content ?? item
+      return (content?.RefId ?? content?.refId) === refId
+    })
+    return match ?? null
+  } catch {
+    return null
+  }
+}
+
 export async function getMarketplaceVtexProductStatus(
   vtexAppKey: string,
   vtexAppToken: string,

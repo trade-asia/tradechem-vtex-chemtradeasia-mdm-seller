@@ -2,7 +2,6 @@ import { IOClients } from '@vtex/api'
 import { MdmClient } from './MdmClient'
 import { SellerCatalogClient } from './SellerCatalogClient'
 import { SellerPricingClient } from './SellerPricingClient'
-import { VtexSuggestionsClient } from './VtexSuggestionsClient'
 
 export class Clients extends IOClients {
   public get mdm() {
@@ -15,9 +14,5 @@ export class Clients extends IOClients {
 
   public get sellerPricing() {
     return this.getOrSet('sellerPricing', SellerPricingClient)
-  }
-
-  public get vtexSuggestions() {
-    return this.getOrSet('vtexSuggestions', VtexSuggestionsClient)
   }
 }

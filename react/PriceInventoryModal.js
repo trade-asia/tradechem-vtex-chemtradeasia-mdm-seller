@@ -215,8 +215,12 @@ const PriceInventoryModal = ({ product, onClose }) => {
     // mdmSku: lets the backend fall back to a live, independent check
     // against the seller's own VTEX catalog (by RefId) when MDM has no
     // metadata record yet, instead of assuming the product was never
-    // created (2026-10-24).
+    // created (2026-10-24). marketplaceProductId/marketplaceSkuId: the
+    // product's current marketplace link, if any — lets the backend keep
+    // metadata's own copy of those two fields in sync, same instruction.
     const params = new URLSearchParams({ mdmProductId: product.id, mdmSku: product.sku })
+    if (product.vtex?.vtex_product_id) params.set('marketplaceProductId', String(product.vtex.vtex_product_id))
+    if (product.vtex?.vtex_sku_id) params.set('marketplaceSkuId', String(product.vtex.vtex_sku_id))
     fetch(`${BASE}/products/price-inventory?${params.toString()}`)
       .then(parseResponse)
       .then(data => {

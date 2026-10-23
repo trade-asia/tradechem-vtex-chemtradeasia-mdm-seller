@@ -16,6 +16,7 @@ import {
   getMarketplaceCategoryMap,
   getMarketplaceBrandMap,
   getMarketplaceWarehouseMap,
+  findMarketplaceSuggestionByRefId,
 } from '../helpers/marketplaceVtexClient'
 
 async function readSettings(ctx: ServiceContext<Clients>): Promise<any | null> {
@@ -495,7 +496,14 @@ export async function getSellerCatalogStatus(ctx: ServiceContext<Clients>) {
     try { settings = await readMdmConfig(ctx) } catch {}
     const { vtexAppKey, vtexAppToken } = settings ?? {}
     if (vtexAppKey && vtexAppToken) {
-      const suggestion = await ctx.clients.vtexSuggestions.getSuggestion(vtexAppKey, vtexAppToken, ctx.vtex.account, sellerSid)
+      // Searched by RefId against the Suggestions LIST, not a direct GET
+      // keyed on sellerSid (2026-10-24: the Seller Portal Catalog API's own
+      // SKU id and the Suggestions API's SellerStockKeepingUnitId are two
+      // different id spaces — not guaranteed to be the same number, and
+      // assuming so silently 404'd this lookup even for a genuinely
+      // published offer). Status is read straight off the matched
+      // suggestion itself.
+      const suggestion = await findMarketplaceSuggestionByRefId(vtexAppKey, vtexAppToken, ctx.vtex.account, mdmSku)
       if (!suggestion) {
         offerState = 'processing'
       } else {
@@ -571,10 +579,57 @@ interface SellerDashboardSaved {
   warehouseId?: string
   quantity?: number | null
   unlimitedQuantity?: boolean
+  marketplaceProductId?: string
+  marketplaceSkuId?: string
 }
 
 function readSellerDashboardRaw(metadata: any): any | null {
   return metadata?.[METADATA_KEY] ?? metadata?.[LEGACY_METADATA_KEY] ?? null
+}
+
+// On every Price & Inventory open: if the product is actually linked on
+// the marketplace side (marketplaceProductId/marketplaceSkuId known —
+// passed in by the frontend from the same product row), check whether
+// metadata's own marketplace_product_id/marketplace_sku_id already match
+// that. If they match, skip entirely — no write (2026-10-24, explicit
+// instruction: "if both are matching then skip"). If they don't (missing,
+// stale, or never set), merge just those two fields into whatever's
+// already there and write back — every OTHER field in the raw metadata
+// object (this SellerDashboard record's own other fields, and any
+// unrelated top-level keys another feature might have written) is passed
+// through completely untouched, per the explicit "other data should not
+// be overwritten" instruction.
+async function syncMarketplaceLinkIntoMetadata(
+  ctx: ServiceContext<Clients>,
+  auth: MdmAuth,
+  mdmProductId: string,
+  currentMetadata: any,
+  saved: SellerDashboardSaved | null,
+  marketplaceProductId?: string,
+  marketplaceSkuId?: string
+): Promise<void> {
+  if (!marketplaceProductId || !marketplaceSkuId) return
+  if (saved?.marketplaceProductId === marketplaceProductId && saved?.marketplaceSkuId === marketplaceSkuId) return
+
+  try {
+    const existingRaw = readSellerDashboardRaw(currentMetadata) ?? {}
+    const updatedRecord = {
+      ...existingRaw,
+      marketplace_product_id: marketplaceProductId,
+      marketplace_sku_id: marketplaceSkuId,
+    }
+    // Writes under the new key only, same as every other write in this
+    // file — but if a legacy-keyed record happens to still be sitting
+    // there too, it's left exactly as-is rather than removed, per the
+    // explicit "other data should not be overwritten" instruction.
+    await withAuthRetry(ctx, auth, a => ctx.clients.mdm.setProductMetadata(a.token, mdmProductId, {
+      ...(currentMetadata ?? {}),
+      [METADATA_KEY]: updatedRecord,
+    }))
+  } catch {
+    // Best-effort — this is a background sync on top of an already-
+    // successful read; a failure here shouldn't block showing the modal.
+  }
 }
 
 function normalizeSellerDashboardRecord(raw: any): SellerDashboardSaved | null {
@@ -587,6 +642,8 @@ function normalizeSellerDashboardRecord(raw: any): SellerDashboardSaved | null {
     warehouseId: pick(raw, 'warehouse_id', 'warehouseId'),
     quantity: pick(raw, 'quantity'),
     unlimitedQuantity: pick(raw, 'unlimited_quantity', 'unlimitedQuantity'),
+    marketplaceProductId: pick(raw, 'marketplace_product_id', 'marketplaceProductId'),
+    marketplaceSkuId: pick(raw, 'marketplace_sku_id', 'marketplaceSkuId'),
   }
 }
 
@@ -638,6 +695,15 @@ export async function getSellerPriceInventory(ctx: ServiceContext<Clients>) {
   // catalog fallback below (2026-10-24). The frontend already has this on
   // every product row, so it's just passed straight through.
   const mdmSku = (ctx.query as any).mdmSku as string | undefined
+  // The product's CURRENT marketplace link, if any — passed in by the
+  // frontend from the same row (product.vtex.vtex_product_id/
+  // vtex_sku_id). Used only to keep metadata's own marketplace_product_id
+  // /marketplace_sku_id in sync on open (2026-10-24, explicit
+  // instruction): if they already match what's saved, nothing happens;
+  // if not, just those two fields get merged in — see
+  // syncMarketplaceLinkIntoMetadata's own note.
+  const marketplaceProductId = (ctx.query as any).marketplaceProductId as string | undefined
+  const marketplaceSkuId = (ctx.query as any).marketplaceSkuId as string | undefined
   if (!mdmProductId) {
     ctx.body = { success: false, error: 'mdmProductId is required' }
     return
@@ -661,6 +727,7 @@ export async function getSellerPriceInventory(ctx: ServiceContext<Clients>) {
       const product = await ctx.clients.sellerCatalog.getProduct(Number(saved.sellerPid), userToken)
       if (product) {
         const warehouses = await ctx.clients.sellerCatalog.listWarehouses(userToken)
+        await syncMarketplaceLinkIntoMetadata(ctx, auth, mdmProductId, metadata, saved, marketplaceProductId, marketplaceSkuId)
         ctx.body = {
           success: true,
           linked: true,
