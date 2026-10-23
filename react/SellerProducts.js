@@ -759,6 +759,15 @@ const SellerProducts = () => {
     if (sortBy) {
       params.set('sort_by', sortBy)
       params.set('sort_direction', sortDirection || 'asc')
+    } else {
+      // "Default (recently added)" is supposed to mean newest-first, but
+      // leaving sort_by/sort_direction unset falls through to MDM's own
+      // default ordering, which is oldest-first (ascending) — confirmed
+      // live 2026-10-23: newly added products showed up at the end of the
+      // list, not the top. Request it explicitly instead of relying on
+      // MDM's default to match what the label says.
+      params.set('sort_by', 'created_at')
+      params.set('sort_direction', 'desc')
     }
     return params
   }, [nameFilter, skuFilter, casFilter, hsFilter, statusFilter, linkedFilter, sortBy, sortDirection])
@@ -1164,6 +1173,13 @@ const SellerProducts = () => {
             />
           </div>
         </div>
+      </div>
+
+      <div style={{
+        fontSize: 12, color: '#475569', background: '#eff6ff', border: '1px solid #bfdbfe',
+        borderRadius: 6, padding: '8px 12px', marginBottom: 12,
+      }}>
+        If you've added products from "+ Add product" above or via CSV Import and they're not visible here, try refreshing the table with the ↻ button on the top right.
       </div>
 
       <div style={{ border: '1px solid #e0e4e8', borderRadius: 6, overflow: 'hidden' }}>
