@@ -469,7 +469,7 @@ const ImportErrorBadge = ({ message }) => {
 const IMPORT_ROW_STEP_LABELS = {
   pending: 'Waiting…',
   creating_product: 'Creating product…',
-  creating_metadata: 'Saving details…',
+  creating_metadata: 'Creating metadata…',
   done: 'Done',
 }
 
@@ -720,164 +720,178 @@ const ImportModal = ({ onClose, onImported }) => {
   const successCount = rows.filter(r => r.status === 'done').length
   const errorCount = rows.filter(r => r.status === 'error').length
 
+  // Two steps: "upload" (banner, instructions, file picker/conflict) and
+  // "progress" (the live per-row run + result). A row is created the
+  // instant runImport starts, so rows.length doubles as the step flag —
+  // switching to a dedicated progress view, not appending progress below
+  // the instructions on the same screen (2026-10-24, explicit instruction).
+  // The content area has a fixed height with its own internal scroll so the
+  // modal itself never resizes between steps, or as the instructions/rows
+  // list grow taller than it.
+  const onUploadStep = !rows.length
+
   return (
     <Modal isOpen centered onClose={onClose} title="Import Products">
       <div style={{ minWidth: 680, maxWidth: 760, fontFamily: 'inherit' }}>
-        <div style={{
-          fontSize: 12.5, color: IMPORT_COLORS.primary, background: IMPORT_COLORS.primaryBg,
-          border: `1px solid ${IMPORT_COLORS.primaryBorder}`, borderRadius: 8, padding: '12px 14px', marginBottom: 14,
-          lineHeight: 1.5,
-        }}>
-          Every product created this way starts as <strong>Pending Approval</strong> until a <strong>marketplace admin</strong> reviews it.
-        </div>
-
-        <div style={{
-          background: IMPORT_COLORS.bgSubtle, border: `1px solid ${IMPORT_COLORS.border}`, borderRadius: 8,
-          padding: '14px 16px', marginBottom: 16,
-        }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: IMPORT_COLORS.label, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
-            Before you upload
-          </div>
-          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, color: IMPORT_COLORS.text, lineHeight: 1.7 }}>
-            <li>SKU must be unique across the whole system — rows with a duplicate SKU will not be imported.</li>
-            <li>A row with a duplicate SKU, or no SKU at all, will be flagged as an error.</li>
-            <li>
-              Mandatory columns: <strong>sku, name, cas_number, hs_code</strong>, plus the metadata columns{' '}
-              <strong>{METADATA_COLUMNS.map(c => c.key).join(', ')}</strong> — all are required in the CSV.
-            </li>
-            <li>The CSV must contain a valid CAS number for each row.</li>
-            <li>There are many other details you can add or update once the product exists in the system — the CSV only needs to cover the fields above to get started.</li>
-          </ul>
-          <button
-            onClick={downloadSample}
-            style={{ background: 'none', border: 'none', color: IMPORT_COLORS.primary, fontSize: 12, fontWeight: 600, cursor: 'pointer', padding: 0, marginTop: 10 }}
-          >
-            Download sample CSV →
-          </button>
-        </div>
-
-        {conflict ? (() => {
-          const activeFlagged = conflict.flagged.filter(s => s.status === 'active')
-          const rejectedFlagged = conflict.flagged.filter(s => s.status === 'rejected')
-          return (
-            <div style={{
-              fontSize: 12.5, color: IMPORT_COLORS.warningText, background: IMPORT_COLORS.warningBg,
-              border: `1px solid ${IMPORT_COLORS.warningBorder}`, borderRadius: 8, padding: '14px 16px', marginBottom: 16,
-            }}>
-              {activeFlagged.length > 0 && (
-                <div style={{ marginBottom: rejectedFlagged.length > 0 ? 14 : 8 }}>
-                  <div style={{ fontWeight: 700, marginBottom: 6 }}>
-                    {activeFlagged.length} SKU{activeFlagged.length > 1 ? 's are' : ' is'} already active
-                  </div>
-                  <div style={{ marginBottom: 8 }}>
-                    Updating {activeFlagged.length > 1 ? 'them' : 'it'} will revert the status back to Pending
-                    Approval in both MDM and the marketplace, and the product will be delisted from the marketplace until it's re-approved.
-                  </div>
-                  <div style={{ maxHeight: 120, overflowY: 'auto' }}>
-                    {activeFlagged.map(s => (
-                      <div key={s.sku} style={{ fontFamily: 'monospace' }}>{s.sku} — {s.name}</div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {rejectedFlagged.length > 0 && (
-                <div style={{ marginBottom: 8 }}>
-                  <div style={{ fontWeight: 700, marginBottom: 6 }}>
-                    {rejectedFlagged.length} SKU{rejectedFlagged.length > 1 ? 's are' : ' is'} currently rejected
-                  </div>
-                  <div style={{ marginBottom: 8 }}>
-                    Updating {rejectedFlagged.length > 1 ? 'them' : 'it'} will resubmit for re-review, resetting the
-                    status back to Pending Approval — this wasn't live on the marketplace before, so nothing will be delisted.
-                  </div>
-                  <div style={{ maxHeight: 120, overflowY: 'auto' }}>
-                    {rejectedFlagged.map(s => (
-                      <div key={s.sku} style={{ fontFamily: 'monospace' }}>{s.sku} — {s.name}</div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              <div>Proceed and update everyone anyway, or skip just these SKUs and import the rest?</div>
-            </div>
-          )
-        })() : !rows.length && (
-          <div style={{ marginBottom: 12 }}>
-            <input
-              type="file"
-              accept=".csv,.txt"
-              onChange={e => {
-                const f = e.target.files?.[0] ?? null
-                setError(null)
-                // accept=".csv,.txt" only hints the OS picker — it doesn't
-                // block "All Files" overrides, and gave no feedback at all
-                // when a wrong format slipped through (client-reported: no
-                // notification shown for a wrong file format). Check the
-                // extension ourselves and surface it in the same error slot.
-                if (f && !/\.(csv|txt)$/i.test(f.name)) {
-                  setError(`Unsupported file type "${f.name}" — please select a .csv file.`)
-                  setFile(null)
-                  return
-                }
-                setFile(f)
-              }}
-            />
-          </div>
-        )}
-
-        {error && <div style={{ marginBottom: 12 }}><Alert type="error">{error}</Alert></div>}
-
-        {rows.length > 0 && (
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-              <div style={{ fontSize: 12.5, fontWeight: 700, color: IMPORT_COLORS.text }}>
-                {done
-                  ? `Import finished — ${successCount} created, ${errorCount} error${errorCount === 1 ? '' : 's'}`
-                  : `Importing… ${successCount + errorCount} of ${rows.length} done`}
-              </div>
-              {done && errorCount > 0 && (
-                <button
-                  onClick={downloadReport}
-                  style={{ background: 'none', border: 'none', color: IMPORT_COLORS.primary, fontSize: 12, fontWeight: 600, cursor: 'pointer', padding: 0 }}
-                >
-                  Download report (fix &amp; re-upload) →
-                </button>
-              )}
-            </div>
-            <div style={{ border: `1px solid ${IMPORT_COLORS.border}`, borderRadius: 8, overflow: 'hidden', maxHeight: 320, overflowY: 'auto' }}>
+        <div style={{ height: 480, overflowY: 'auto', paddingRight: 4 }}>
+          {onUploadStep ? (
+            <>
               <div style={{
-                display: 'grid', gridTemplateColumns: '40px 1fr 1fr 170px', gap: 8, padding: '8px 12px',
-                fontSize: 10, fontWeight: 700, color: IMPORT_COLORS.label, textTransform: 'uppercase', letterSpacing: '0.05em',
-                background: IMPORT_COLORS.bgSubtle, borderBottom: `1px solid ${IMPORT_COLORS.border}`,
-                position: 'sticky', top: 0,
+                fontSize: 12.5, color: IMPORT_COLORS.primary, background: IMPORT_COLORS.primaryBg,
+                border: `1px solid ${IMPORT_COLORS.primaryBorder}`, borderRadius: 8, padding: '12px 14px', marginBottom: 14,
+                lineHeight: 1.5,
               }}>
-                <span>Line</span><span>SKU</span><span>Name</span><span>Status</span>
+                Every product created this way starts as <strong>Pending Approval</strong> until a <strong>marketplace admin</strong> reviews it.
               </div>
-              {rows.map((r, i) => {
-                const isSuccess = r.status === 'done'
-                const isError = r.status === 'error'
-                const bg = isSuccess ? IMPORT_COLORS.successBg : isError ? IMPORT_COLORS.dangerBg : '#fff'
-                const fg = isSuccess ? IMPORT_COLORS.successText : isError ? IMPORT_COLORS.dangerText : IMPORT_COLORS.text
+
+              <div style={{
+                background: IMPORT_COLORS.bgSubtle, border: `1px solid ${IMPORT_COLORS.border}`, borderRadius: 8,
+                padding: '14px 16px', marginBottom: 16,
+              }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: IMPORT_COLORS.label, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
+                  Before you upload
+                </div>
+                <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, color: IMPORT_COLORS.text, lineHeight: 1.7 }}>
+                  <li>SKU must be unique across the whole system — rows with a duplicate SKU will not be imported.</li>
+                  <li>A row with a duplicate SKU, or no SKU at all, will be flagged as an error.</li>
+                  <li>
+                    Mandatory columns: <strong>sku, name, cas_number, hs_code</strong>, plus the metadata columns{' '}
+                    <strong>{METADATA_COLUMNS.map(c => c.key).join(', ')}</strong> — all are required in the CSV.
+                  </li>
+                  <li>The CSV must contain a valid CAS number for each row.</li>
+                  <li>There are many other details you can add or update once the product exists in the system — the CSV only needs to cover the fields above to get started.</li>
+                </ul>
+                <button
+                  onClick={downloadSample}
+                  style={{ background: 'none', border: 'none', color: IMPORT_COLORS.primary, fontSize: 12, fontWeight: 600, cursor: 'pointer', padding: 0, marginTop: 10 }}
+                >
+                  Download sample CSV →
+                </button>
+              </div>
+
+              {conflict ? (() => {
+                const activeFlagged = conflict.flagged.filter(s => s.status === 'active')
+                const rejectedFlagged = conflict.flagged.filter(s => s.status === 'rejected')
                 return (
-                  <div
-                    key={i}
-                    style={{
-                      display: 'grid', gridTemplateColumns: '40px 1fr 1fr 170px', gap: 8, padding: '8px 12px',
-                      borderBottom: `1px solid ${IMPORT_COLORS.border}`, fontSize: 12.5, background: bg, color: fg,
-                      alignItems: 'center',
-                    }}
-                  >
-                    <span style={{ color: IMPORT_COLORS.label }}>{r.line}</span>
-                    <span style={{ fontFamily: 'monospace' }}>{r.sku || '—'}</span>
-                    <span>{r.name || '—'}</span>
-                    <span style={{ display: 'flex', alignItems: 'center', fontWeight: 600 }}>
-                      {isError ? 'Error' : isSuccess ? 'Done' : IMPORT_ROW_STEP_LABELS[r.status]}
-                      {isError && <ImportErrorBadge message={r.error} />}
-                    </span>
+                  <div style={{
+                    fontSize: 12.5, color: IMPORT_COLORS.warningText, background: IMPORT_COLORS.warningBg,
+                    border: `1px solid ${IMPORT_COLORS.warningBorder}`, borderRadius: 8, padding: '14px 16px', marginBottom: 16,
+                  }}>
+                    {activeFlagged.length > 0 && (
+                      <div style={{ marginBottom: rejectedFlagged.length > 0 ? 14 : 8 }}>
+                        <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                          {activeFlagged.length} SKU{activeFlagged.length > 1 ? 's are' : ' is'} already active
+                        </div>
+                        <div style={{ marginBottom: 8 }}>
+                          Updating {activeFlagged.length > 1 ? 'them' : 'it'} will revert the status back to Pending
+                          Approval in both MDM and the marketplace, and the product will be delisted from the marketplace until it's re-approved.
+                        </div>
+                        <div style={{ maxHeight: 120, overflowY: 'auto' }}>
+                          {activeFlagged.map(s => (
+                            <div key={s.sku} style={{ fontFamily: 'monospace' }}>{s.sku} — {s.name}</div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {rejectedFlagged.length > 0 && (
+                      <div style={{ marginBottom: 8 }}>
+                        <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                          {rejectedFlagged.length} SKU{rejectedFlagged.length > 1 ? 's are' : ' is'} currently rejected
+                        </div>
+                        <div style={{ marginBottom: 8 }}>
+                          Updating {rejectedFlagged.length > 1 ? 'them' : 'it'} will resubmit for re-review, resetting the
+                          status back to Pending Approval — this wasn't live on the marketplace before, so nothing will be delisted.
+                        </div>
+                        <div style={{ maxHeight: 120, overflowY: 'auto' }}>
+                          {rejectedFlagged.map(s => (
+                            <div key={s.sku} style={{ fontFamily: 'monospace' }}>{s.sku} — {s.name}</div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    <div>Proceed and update everyone anyway, or skip just these SKUs and import the rest?</div>
                   </div>
                 )
-              })}
+              })() : (
+                <div style={{ marginBottom: 12 }}>
+                  <input
+                    type="file"
+                    accept=".csv,.txt"
+                    onChange={e => {
+                      const f = e.target.files?.[0] ?? null
+                      setError(null)
+                      // accept=".csv,.txt" only hints the OS picker — it doesn't
+                      // block "All Files" overrides, and gave no feedback at all
+                      // when a wrong format slipped through (client-reported: no
+                      // notification shown for a wrong file format). Check the
+                      // extension ourselves and surface it in the same error slot.
+                      if (f && !/\.(csv|txt)$/i.test(f.name)) {
+                        setError(`Unsupported file type "${f.name}" — please select a .csv file.`)
+                        setFile(null)
+                        return
+                      }
+                      setFile(f)
+                    }}
+                  />
+                </div>
+              )}
+
+              {error && <div style={{ marginBottom: 12 }}><Alert type="error">{error}</Alert></div>}
+            </>
+          ) : (
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: IMPORT_COLORS.text }}>
+                  {done
+                    ? `Import finished — ${successCount} created, ${errorCount} error${errorCount === 1 ? '' : 's'}`
+                    : `Importing… ${successCount + errorCount} of ${rows.length} done`}
+                </div>
+                {done && errorCount > 0 && (
+                  <button
+                    onClick={downloadReport}
+                    style={{ background: 'none', border: 'none', color: IMPORT_COLORS.primary, fontSize: 12, fontWeight: 600, cursor: 'pointer', padding: 0 }}
+                  >
+                    Download report (fix &amp; re-upload) →
+                  </button>
+                )}
+              </div>
+              <div style={{ border: `1px solid ${IMPORT_COLORS.border}`, borderRadius: 8 }}>
+                <div style={{
+                  display: 'grid', gridTemplateColumns: '40px 1fr 1fr 170px', gap: 8, padding: '8px 12px',
+                  fontSize: 10, fontWeight: 700, color: IMPORT_COLORS.label, textTransform: 'uppercase', letterSpacing: '0.05em',
+                  background: IMPORT_COLORS.bgSubtle, borderBottom: `1px solid ${IMPORT_COLORS.border}`,
+                  position: 'sticky', top: 0,
+                }}>
+                  <span>Line</span><span>SKU</span><span>Name</span><span>Status</span>
+                </div>
+                {rows.map((r, i) => {
+                  const isSuccess = r.status === 'done'
+                  const isError = r.status === 'error'
+                  const bg = isSuccess ? IMPORT_COLORS.successBg : isError ? IMPORT_COLORS.dangerBg : '#fff'
+                  const fg = isSuccess ? IMPORT_COLORS.successText : isError ? IMPORT_COLORS.dangerText : IMPORT_COLORS.text
+                  return (
+                    <div
+                      key={i}
+                      style={{
+                        display: 'grid', gridTemplateColumns: '40px 1fr 1fr 170px', gap: 8, padding: '8px 12px',
+                        borderBottom: `1px solid ${IMPORT_COLORS.border}`, fontSize: 12.5, background: bg, color: fg,
+                        alignItems: 'center',
+                      }}
+                    >
+                      <span style={{ color: IMPORT_COLORS.label }}>{r.line}</span>
+                      <span style={{ fontFamily: 'monospace' }}>{r.sku || '—'}</span>
+                      <span>{r.name || '—'}</span>
+                      <span style={{ display: 'flex', alignItems: 'center', fontWeight: 600 }}>
+                        {isError ? 'Error' : isSuccess ? 'Done' : IMPORT_ROW_STEP_LABELS[r.status]}
+                        {isError && <ImportErrorBadge message={r.error} />}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
           <Button variation="tertiary" onClick={conflict ? () => setConflict(null) : onClose}>
@@ -893,7 +907,7 @@ const ImportModal = ({ onClose, onImported }) => {
               </Button>
             </>
           )}
-          {!rows.length && !conflict && (
+          {onUploadStep && !conflict && (
             <Button variation="primary" onClick={handleImport} isLoading={checking || importing} disabled={!file}>
               Import
             </Button>
@@ -939,6 +953,112 @@ const RejectionReasonModal = ({ product, onClose }) => {
   )
 }
 
+// ── Guided product tour (2026-10-24, explicit instruction) ──
+// Steps target elements marked with a matching data-tour="..." attribute
+// elsewhere in this file. rowOnly steps only run when at least one product
+// row exists (they target the first row specifically); if a target is
+// missing for any other reason (e.g. Edit hidden for a fully-live product),
+// TourOverlay skips that step automatically rather than spotlighting nothing.
+const TOUR_STEPS = [
+  { id: 'import', title: 'Import products', body: 'Upload a CSV to create or update many products at once. Each row is validated and imported individually, with live progress and a downloadable error report if anything goes wrong.' },
+  { id: 'add-product', title: 'Add a product', body: 'Create a single product by hand.' },
+  { id: 'filters', title: 'Filters', body: 'Narrow the list down by name, SKU, CAS number, HS code, status, or marketplace link state.' },
+  { id: 'pagination', title: 'Pagination', body: 'Move between pages of results.' },
+  { id: 'refresh', title: 'Refresh', body: 'Re-fetch the list with your current filters — useful right after an import or a marketplace change.' },
+  { id: 'sort', title: 'Sort order', body: 'Choose what to sort by, and toggle ascending or descending.' },
+  { id: 'columns', title: 'Table columns', body: "MDM Status is this product's internal workflow stage. Published is its real, live state on the marketplace. PID / SID is the marketplace's own Product ID and SKU ID, once linked." },
+  { id: 'price-inventory', title: 'Price & Inventory', body: 'Set price, stock, and the other marketplace-specific fields for this product.', rowOnly: true },
+  { id: 'mdm-status', title: 'MDM Status', body: "This product's internal workflow status in MDM.", rowOnly: true },
+  { id: 'published', title: 'Published', body: 'The real, live offer status on the marketplace — Pending, Processing, Rejected, Approved, or Published.', rowOnly: true },
+  { id: 'link', title: 'PID / SID', body: "Once linked, the marketplace's own Product ID and SKU ID for this product.", rowOnly: true },
+  { id: 'edit', title: 'Edit product', body: 'Edit this product in MDM. This disappears once a product is fully live on the marketplace — the marketplace then owns the listing.', rowOnly: true },
+]
+
+const TourOverlay = ({ step, onStepChange, hasProducts }) => {
+  const steps = React.useMemo(() => TOUR_STEPS.filter(s => !s.rowOnly || hasProducts), [hasProducts])
+  const [rect, setRect] = useState(null)
+
+  useEffect(() => {
+    if (step === null) return
+    if (step >= steps.length) { onStepChange(null); return }
+    const current = steps[step]
+    const el = document.querySelector(`[data-tour="${current.id}"]`)
+    if (!el) {
+      onStepChange(step + 1)
+      return
+    }
+    const update = () => setRect(el.getBoundingClientRect())
+    update()
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    window.addEventListener('resize', update)
+    window.addEventListener('scroll', update, true)
+    return () => {
+      window.removeEventListener('resize', update)
+      window.removeEventListener('scroll', update, true)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, steps])
+
+  if (step === null || step >= steps.length || !rect) return null
+
+  const current = steps[step]
+  const pad = 6
+  const spotlightStyle = {
+    position: 'fixed',
+    top: rect.top - pad, left: rect.left - pad,
+    width: rect.width + pad * 2, height: rect.height + pad * 2,
+    borderRadius: 8,
+    boxShadow: '0 0 0 9999px rgba(0,0,0,0.6)',
+    pointerEvents: 'none',
+    zIndex: 10000,
+  }
+  const spaceBelow = window.innerHeight - rect.bottom
+  const tooltipTop = spaceBelow > 180
+    ? rect.bottom + pad * 2 + 8
+    : Math.max(12, rect.top - pad * 2 - 160)
+  const tooltipLeft = Math.min(Math.max(12, rect.left), window.innerWidth - 332)
+
+  return ReactDOM.createPortal(
+    <>
+      <div style={spotlightStyle} />
+      <div style={{
+        position: 'fixed', top: tooltipTop, left: tooltipLeft, width: 320,
+        background: '#fff', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
+        padding: 16, zIndex: 10001, fontFamily: 'inherit',
+      }}>
+        <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>Step {step + 1} of {steps.length}</div>
+        <div style={{ fontSize: 14, fontWeight: 700, color: '#142032', marginBottom: 6 }}>{current.title}</div>
+        <div style={{ fontSize: 13, color: '#475569', lineHeight: 1.5, marginBottom: 14 }}>{current.body}</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <button
+            onClick={() => onStepChange(null)}
+            style={{ background: 'none', border: 'none', color: '#888', fontSize: 12, cursor: 'pointer', padding: 0 }}
+          >
+            Skip tour
+          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {step > 0 && (
+              <button
+                onClick={() => onStepChange(step - 1)}
+                style={{ background: '#fff', border: '1px solid #d5d7d9', borderRadius: 4, padding: '5px 12px', fontSize: 12, fontWeight: 600, color: '#142032', cursor: 'pointer' }}
+              >
+                Back
+              </button>
+            )}
+            <button
+              onClick={() => onStepChange(step + 1 >= steps.length ? null : step + 1)}
+              style={{ background: '#2563eb', border: 'none', borderRadius: 4, padding: '5px 14px', fontSize: 12, fontWeight: 600, color: '#fff', cursor: 'pointer' }}
+            >
+              {step + 1 >= steps.length ? 'Finish' : 'Next'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </>,
+    document.body
+  )
+}
+
 const SellerProducts = () => {
   const [products, setProducts] = useState([])
   const [loading, setLoading] = useState(true)
@@ -978,6 +1098,10 @@ const SellerProducts = () => {
   const [unpublishingId, setUnpublishingId] = useState(null)
   const [unpublishError, setUnpublishError] = useState(null)
   const [unpublishDone, setUnpublishDone] = useState(false)
+
+  // Guided product tour (2026-10-24, explicit instruction) — null = not
+  // running, otherwise the index into TOUR_STEPS currently spotlighted.
+  const [tourStep, setTourStep] = useState(null)
 
   // Live VTEX status — MDM's own status field can't be trusted alone to
   // reflect whether the linked VTEX product is actually Active/Inactive
@@ -1317,10 +1441,24 @@ const SellerProducts = () => {
               + Export products
             </Button>
           </span>
-          <Button variation="secondary" onClick={() => setShowImport(true)}>+ Import products</Button>
-          <Button variation="primary" onClick={handleAddClick} isLoading={addLoading}>
-            + Add product
-          </Button>
+          <span data-tour="import"><Button variation="secondary" onClick={() => setShowImport(true)}>+ Import products</Button></span>
+          <span data-tour="add-product">
+            <Button variation="primary" onClick={handleAddClick} isLoading={addLoading}>
+              + Add product
+            </Button>
+          </span>
+          <button
+            onClick={() => setTourStep(0)}
+            title="Start guided tour"
+            style={{
+              width: 40, height: 40, flexShrink: 0, borderRadius: '50%', border: 'none',
+              background: '#2563eb', color: '#fff', display: 'inline-flex', alignItems: 'center',
+              justifyContent: 'center', cursor: 'pointer', boxShadow: '0 2px 6px rgba(37,99,235,0.35)',
+              fontSize: 16, fontWeight: 700, lineHeight: 1,
+            }}
+          >
+            ?
+          </button>
         </div>
       </div>
       {addLinkError && <div style={{ marginTop: 12 }}><Alert type="error" onClose={() => setAddLinkError(null)}>{addLinkError}</Alert></div>}
@@ -1368,7 +1506,7 @@ const SellerProducts = () => {
         </div>
       )}
 
-      <div style={{
+      <div data-tour="filters" style={{
         display: 'grid',
         // Fixed 3 per row rather than auto-fit — auto-fit let everything
         // cram into one wide row on a large screen instead of a consistent
@@ -1411,35 +1549,38 @@ const SellerProducts = () => {
               component always renders its own label above the input,
               which can't be made to match a plain 32px button's height.
               Sized to exactly match the refresh button next to it. */}
-          <select
-            value={sortBy}
-            onChange={e => setSortBy(e.target.value)}
-            style={{
-              height: 32, boxSizing: 'border-box', padding: '0 8px',
-              border: '1px solid #d5d7d9', borderRadius: 4, background: '#fff',
-              fontSize: 13, color: '#142032', cursor: 'pointer',
-            }}
-          >
-            {SORT_FIELD_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
+          <span data-tour="sort" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <select
+              value={sortBy}
+              onChange={e => setSortBy(e.target.value)}
+              style={{
+                height: 32, boxSizing: 'border-box', padding: '0 8px',
+                border: '1px solid #d5d7d9', borderRadius: 4, background: '#fff',
+                fontSize: 13, color: '#142032', cursor: 'pointer',
+              }}
+            >
+              {SORT_FIELD_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+            <button
+              type="button"
+              onClick={handleSortDirectionToggle}
+              disabled={!sortBy}
+              title={sortDirection === 'desc' ? 'Descending — click for ascending' : 'Ascending — click for descending'}
+              style={{
+                height: 32, width: 32, flexShrink: 0, marginRight: 9,
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                boxSizing: 'border-box', padding: 0,
+                border: '1px solid #d5d7d9', borderRadius: 4, background: '#fff',
+                cursor: sortBy ? 'pointer' : 'not-allowed',
+                opacity: sortBy ? 1 : 0.4,
+                fontSize: 15, lineHeight: 1,
+              }}
+            >
+              {sortDirection === 'desc' ? '↓' : '↑'}
+            </button>
+          </span>
           <button
-            type="button"
-            onClick={handleSortDirectionToggle}
-            disabled={!sortBy}
-            title={sortDirection === 'desc' ? 'Descending — click for ascending' : 'Ascending — click for descending'}
-            style={{
-              height: 32, width: 32, flexShrink: 0, marginRight: 9,
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              boxSizing: 'border-box', padding: 0,
-              border: '1px solid #d5d7d9', borderRadius: 4, background: '#fff',
-              cursor: sortBy ? 'pointer' : 'not-allowed',
-              opacity: sortBy ? 1 : 0.4,
-              fontSize: 15, lineHeight: 1,
-            }}
-          >
-            {sortDirection === 'desc' ? '↓' : '↑'}
-          </button>
-          <button
+            data-tour="refresh"
             onClick={handleRefresh}
             disabled={loading}
             title="Refresh with current filters"
@@ -1481,7 +1622,7 @@ const SellerProducts = () => {
               a global rule that would also hit the second, unrelated
               Pagination instance below the table. */}
           <style>{`.seller-products-top-pagination .pt5 { margin-top: 47px; }`}</style>
-          <div className="seller-products-top-pagination" style={{ marginTop: -64 }}>
+          <div data-tour="pagination" className="seller-products-top-pagination" style={{ marginTop: -64 }}>
             <Pagination
               currentItemFrom={totalFrom}
               currentItemTo={totalTo}
@@ -1502,7 +1643,7 @@ const SellerProducts = () => {
       </div>
 
       <div style={{ border: '1px solid #e0e4e8', borderRadius: 6, overflow: 'hidden' }}>
-        <div style={{
+        <div data-tour="columns" style={{
           display: 'grid', gridTemplateColumns: COLS, gap: '0 16px', padding: '10px 16px',
           background: '#f0f4f8', borderBottom: '2px solid #dce4ec', fontSize: 11, fontWeight: 700,
           color: '#6b7c93', letterSpacing: '0.6px', textTransform: 'uppercase',
@@ -1620,6 +1761,7 @@ const SellerProducts = () => {
                       marketplace now owns the live listing. */}
                   {showEdit && (
                     <button
+                      data-tour={idx === 0 ? 'edit' : undefined}
                       onClick={() => handleEditClick(p)}
                       disabled={editLoadingId === p.id}
                       title="Edit this product"
@@ -1634,6 +1776,7 @@ const SellerProducts = () => {
                     </button>
                   )}
                   <button
+                    data-tour={idx === 0 ? 'price-inventory' : undefined}
                     onClick={() => setPriceInventoryProduct(p)}
                     title={
                       inSellerCatalog
@@ -1688,7 +1831,7 @@ const SellerProducts = () => {
                   )}
                 </div>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, paddingTop: 2 }}>
+              <div data-tour={idx === 0 ? 'mdm-status' : undefined} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, paddingTop: 2 }}>
                 {/* Status modal unwired (2026-10-24, explicit instruction) —
                     not deleted, just no longer clickable. Restore by
                     swapping this back for:
@@ -1713,7 +1856,7 @@ const SellerProducts = () => {
                   </button>
                 )}
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', paddingTop: 2 }}>
+              <div data-tour={idx === 0 ? 'published' : undefined} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', paddingTop: 2 }}>
                 {/* Live-checked per row, progressively — real offer status
                     (not_submitted/processing/pending/rejected/approved/
                     published), each with its own tooltip (2026-10-24,
@@ -1728,7 +1871,7 @@ const SellerProducts = () => {
                   </span>
                 )}
               </div>
-              <div style={{ fontSize: 12, color: '#666', paddingTop: 2, fontFamily: 'monospace', textAlign: 'center' }}>
+              <div data-tour={idx === 0 ? 'link' : undefined} style={{ fontSize: 12, color: '#666', paddingTop: 2, fontFamily: 'monospace', textAlign: 'center' }}>
                 {p.vtex?.linked
                   // SID shows "-" until MDM's own GET /vtex/products starts
                   // returning vtex_sku_id on read (their write side already
@@ -1857,6 +2000,7 @@ const SellerProducts = () => {
           onImported={() => { fetchParamsRef.current = { page: 1 }; doFetch() }}
         />
       )}
+      <TourOverlay step={tourStep} onStepChange={setTourStep} hasProducts={products.length > 0} />
     </div>
   )
 }
