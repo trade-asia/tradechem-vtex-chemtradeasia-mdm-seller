@@ -611,6 +611,23 @@ const ImportModal = ({ onClose, onImported }) => {
         throw new Error(`CSV has rows missing required fields — ${shown.join('; ')}${suffix}`)
       }
 
+      // CAS number format (2026-10-24, explicit instruction: "CSV must
+      // contain valid CAS number") — standard CAS Registry Number shape,
+      // digits-digits-checkdigit (e.g. "104-76-7"). MDM's own import
+      // endpoint doesn't validate this at all (see the duplicate-SKU note
+      // just below — same "accepts silently" behavior), so this is the
+      // only check catching an obviously malformed one before import.
+      const CAS_FORMAT = /^\d{2,7}-\d{2}-\d$/
+      const casErrors = dataRows.map((r, i) => {
+        const cas = (r[colIndex.cas_number] ?? '').trim()
+        return cas && !CAS_FORMAT.test(cas) ? `line ${i + 2} (${cas})` : null
+      }).filter(Boolean)
+      if (casErrors.length) {
+        const shown = casErrors.slice(0, 10)
+        const suffix = casErrors.length > shown.length ? `; +${casErrors.length - shown.length} more row(s)` : ''
+        throw new Error(`CSV has rows with an invalid CAS number format (expected digits-digits-checkdigit, e.g. 104-76-7) — ${shown.join('; ')}${suffix}`)
+      }
+
       // Duplicate SKUs within the same file used to pass through silently —
       // the first row created the product, the second quietly overwrote it
       // on the same import run with no warning (client-reported). Flag and
@@ -705,14 +722,13 @@ const ImportModal = ({ onClose, onImported }) => {
 
   return (
     <Modal isOpen centered onClose={onClose} title="Import Products">
-      <div style={{ minWidth: 760, maxWidth: 860, fontFamily: 'inherit' }}>
+      <div style={{ minWidth: 680, maxWidth: 760, fontFamily: 'inherit' }}>
         <div style={{
           fontSize: 12.5, color: IMPORT_COLORS.primary, background: IMPORT_COLORS.primaryBg,
           border: `1px solid ${IMPORT_COLORS.primaryBorder}`, borderRadius: 8, padding: '12px 14px', marginBottom: 14,
           lineHeight: 1.5,
         }}>
-          Every product created this way starts as <strong>Pending Approval</strong> until a <strong>marketplace admin</strong> reviews it
-          — re-uploading an existing SKU later to update it won't undo an approval already given.
+          Every product created this way starts as <strong>Pending Approval</strong> until a <strong>marketplace admin</strong> reviews it.
         </div>
 
         <div style={{
@@ -724,10 +740,12 @@ const ImportModal = ({ onClose, onImported }) => {
           </div>
           <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, color: IMPORT_COLORS.text, lineHeight: 1.7 }}>
             <li>SKU must be unique across the whole system — rows with a duplicate SKU will not be imported.</li>
+            <li>A row with a duplicate SKU, or no SKU at all, will be flagged as an error.</li>
             <li>
               Mandatory columns: <strong>sku, name, cas_number, hs_code</strong>, plus the metadata columns{' '}
               <strong>{METADATA_COLUMNS.map(c => c.key).join(', ')}</strong> — all are required in the CSV.
             </li>
+            <li>The CSV must contain a valid CAS number for each row.</li>
             <li>There are many other details you can add or update once the product exists in the system — the CSV only needs to cover the fields above to get started.</li>
           </ul>
           <button
