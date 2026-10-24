@@ -1312,7 +1312,7 @@ const SellerProducts = () => {
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
           fontSize: 12, color: '#475569', background: '#f1f5f9', border: '1px solid #e2e8f0',
-          borderRadius: 6, padding: '6px 12px', margin: '16px 0',
+          borderRadius: 6, padding: '6px 6px', margin: '16px 0',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
             {sellerInfo.logoUrl ? (
