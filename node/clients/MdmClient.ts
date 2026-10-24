@@ -173,10 +173,19 @@ export class MdmClient extends ExternalClient {
   // before handing the URL to the seller, never pre-generated or cached.
   // Rate limiting and the actual cooldown between clicks are our UI's job
   // (per that same spec), not something to build in here.
-  public async getEditLink(token: string, mdmProductId: string, vtexSellerId: string): Promise<{ url: string; expiresAt: string }> {
+  // restricted (2026-10-25, MDM's own spec): false/omitted issues today's
+  // full link — every field editable (name, SKU, CAS, HS code, origin
+  // countries, certifications, description, attributes, media, documents,
+  // industries, applications). true issues the new content-only link —
+  // only Description, Short Description, Uses, Attributes, Media,
+  // Documents, Industries and Applications are editable; Name, SKU, CAS
+  // Number, HS Code, Country of Origin and Certifications show read-only.
+  // Enforced server-side on MDM's end either way, not just hidden in their
+  // UI — a stale page can't be used to slip a locked field through.
+  public async getEditLink(token: string, mdmProductId: string, vtexSellerId: string, restricted = false): Promise<{ url: string; expiresAt: string }> {
     const res: any = await this.http.post(
       this.url(`/vtex/products/${mdmProductId}/edit-link`),
-      { vtex_seller_id: vtexSellerId },
+      { vtex_seller_id: vtexSellerId, restricted },
       { headers: { Authorization: `Bearer ${token}` } }
     )
     const data = res?.data ?? res

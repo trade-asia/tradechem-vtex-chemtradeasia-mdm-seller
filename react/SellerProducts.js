@@ -12,6 +12,13 @@ const PER_PAGE = 20
 // already have. Flip back to true to restore the buttons; nothing else
 // here was touched (modals, handlers, state all still fully wired).
 const SHOW_MEDIA_DOCUMENTS_BUTTONS = false
+// hidden pending client review — do not expose yet (2026-10-25, MDM's own
+// instruction: build the post-submission restricted Edit button now, but
+// keep it hidden/disabled in production until the client has reviewed and
+// approved the flow). Flip to true once told to go live — nothing else
+// needs to change, the button and its restricted edit-link call are both
+// already fully wired below.
+const ENABLE_RESTRICTED_EDIT = false
 const DEBOUNCE_MS = 500
 
 const STATUS_OPTIONS = [
@@ -1418,11 +1425,19 @@ const SellerProducts = () => {
   // loading. Shows a modal with a spinner in THIS tab while MDM issues the
   // link instead, and only opens the new tab once there's a real URL to
   // send it to — nothing to stare at in the meantime.
-  const handleEditClick = async (product) => {
+  // restricted (2026-10-25, MDM's own instruction): false/omitted gets
+  // today's full edit link (everything editable) — used for the regular
+  // pre-submission Edit button below. true gets the new content-only link
+  // (Description, Short Description, Uses, Attributes, Media, Documents,
+  // Industries, Applications editable; Name/SKU/CAS/HS/Origin/
+  // Certifications read-only, enforced server-side by MDM) — used for the
+  // post-submission Edit button, currently behind ENABLE_RESTRICTED_EDIT.
+  const handleEditClick = async (product, restricted = false) => {
     setEditLoadingId(product.id)
     setEditLinkError(null)
     try {
-      const res = await fetch(`${BASE}/products/edit-link?mdmProductId=${encodeURIComponent(product.id)}`, { method: 'POST' })
+      const qs = `mdmProductId=${encodeURIComponent(product.id)}${restricted ? '&restricted=true' : ''}`
+      const res = await fetch(`${BASE}/products/edit-link?${qs}`, { method: 'POST' })
       const data = await parseResponse(res)
       if (!data.success) throw new Error(data.detail ? `${data.error}: ${data.detail}` : data.error)
       window.open(data.url, '_blank')
@@ -1819,6 +1834,26 @@ const SellerProducts = () => {
                       onClick={() => handleEditClick(p)}
                       disabled={editLoadingId === p.id}
                       title="Edit this product"
+                      style={{
+                        background: '#fff', border: '1px solid #3f7bbf', borderRadius: 4, padding: '3px 10px',
+                        fontSize: 11, fontWeight: 600, color: '#3f7bbf',
+                        cursor: editLoadingId === p.id ? 'not-allowed' : 'pointer',
+                        opacity: editLoadingId === p.id ? 0.6 : 1,
+                      }}
+                    >
+                      {editLoadingId === p.id ? '…' : 'Edit'}
+                    </button>
+                  )}
+                  {/* Post-submission Edit — content fields only (restricted
+                      edit-link), shown once a product is active AND
+                      published, where the full Edit above no longer
+                      applies. Hidden pending client review (2026-10-25) —
+                      see ENABLE_RESTRICTED_EDIT's own comment. */}
+                  {ENABLE_RESTRICTED_EDIT && !isChecking && fullyLive && (
+                    <button
+                      onClick={() => handleEditClick(p, true)}
+                      disabled={editLoadingId === p.id}
+                      title="Edit this product's content (description, media, documents, etc.) — core details are locked once live"
                       style={{
                         background: '#fff', border: '1px solid #3f7bbf', borderRadius: 4, padding: '3px 10px',
                         fontSize: 11, fontWeight: 600, color: '#3f7bbf',

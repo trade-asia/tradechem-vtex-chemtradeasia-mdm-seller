@@ -186,6 +186,11 @@ const PriceInventoryModal = ({ product, onClose }) => {
   const [mediaError, setMediaError] = useState(null)
   const [lightboxUrl, setLightboxUrl] = useState(null)
   const [editLinkLoading, setEditLinkLoading] = useState(false)
+  // Confirm-before-submit (2026-10-25, explicit instruction from MDM) —
+  // only ever shown for first-time creation (see handleSave): Save there
+  // both creates the product and puts it into the marketplace's review
+  // queue, so this is the one chance to back out and review first.
+  const [showSubmitConfirm, setShowSubmitConfirm] = useState(false)
 
   const [activeTab, setActiveTab] = useState('')
 
@@ -433,7 +438,10 @@ const PriceInventoryModal = ({ product, onClose }) => {
     setSaveErrorDetail(null)
 
     if (linked) {
-      // Already exists — plain price/inventory update, no wizard needed.
+      // Already exists — plain price/inventory update, no wizard needed,
+      // and nothing new is being "submitted for review" here, so no
+      // confirmation step applies (that only matters for first-time
+      // creation below).
       setSaving(true)
       try {
         const res = await fetch(`${BASE}/products/price-inventory`, {
@@ -463,6 +471,14 @@ const PriceInventoryModal = ({ product, onClose }) => {
       return
     }
 
+    // First-time creation — this is the actual submission into the
+    // marketplace's review queue (2026-10-25, explicit instruction from
+    // MDM) — confirm first rather than firing straight into the wizard.
+    setShowSubmitConfirm(true)
+  }
+
+  const proceedWithCreateSave = () => {
+    setShowSubmitConfirm(false)
     setSaving(true)
     setWizardActive(true)
     setSteps(pendingSteps())
@@ -727,6 +743,34 @@ const PriceInventoryModal = ({ product, onClose }) => {
           >
             ×
           </button>
+        </div>,
+        document.body
+      )}
+      {showSubmitConfirm && ReactDOM.createPortal(
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 100000, background: 'rgba(15,23,42,0.55)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+          }}
+        >
+          <div style={{ background: '#fff', borderRadius: 10, padding: 24, width: 420, maxWidth: '100%', boxShadow: '0 20px 50px rgba(0,0,0,0.35)' }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: '#142032', marginBottom: 10 }}>Submit for review?</div>
+            <div style={{ fontSize: 13, color: '#475569', lineHeight: 1.6, marginBottom: 20 }}>
+              Once you save, this product will be submitted for review and you won't be able to change these details until it's approved. Please make sure everything is correct before continuing.
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <Button
+                variation="secondary"
+                onClick={() => { setShowSubmitConfirm(false); handleEditClick() }}
+                isLoading={editLinkLoading}
+              >
+                Review once more
+              </Button>
+              <Button variation="primary" onClick={proceedWithCreateSave}>
+                Save
+              </Button>
+            </div>
+          </div>
         </div>,
         document.body
       )}

@@ -1369,6 +1369,11 @@ export async function getVtexProductStatusHandler(ctx: ServiceContext<Clients>) 
 export async function getSellerEditLink(ctx: ServiceContext<Clients>) {
   ctx.status = 200
   const mdmProductId = (ctx.query as any).mdmProductId as string | undefined
+  // restricted=true requests the new content-only link (2026-10-25) — see
+  // MdmClient.getEditLink's own note for exactly what that restricts.
+  // Currently only reachable from SellerProducts.js's hidden post-
+  // submission Edit button (ENABLE_RESTRICTED_EDIT).
+  const restricted = (ctx.query as any).restricted === 'true'
   if (!mdmProductId) {
     ctx.body = { success: false, error: 'mdmProductId is required' }
     return
@@ -1377,7 +1382,7 @@ export async function getSellerEditLink(ctx: ServiceContext<Clients>) {
   if (!auth) return
 
   try {
-    const link = await withAuthRetry(ctx, auth, a => ctx.clients.mdm.getEditLink(a.token, mdmProductId, a.vtexSellerId))
+    const link = await withAuthRetry(ctx, auth, a => ctx.clients.mdm.getEditLink(a.token, mdmProductId, a.vtexSellerId, restricted))
     ctx.body = { success: true, url: link.url, expiresAt: link.expiresAt }
   } catch (err: any) {
     ctx.body = { success: false, error: 'Failed to get edit link', detail: mdmErrDetail(err) }
