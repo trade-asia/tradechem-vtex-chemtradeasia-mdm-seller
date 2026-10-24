@@ -1,6 +1,6 @@
 import { Service, ServiceContext, ParamsContext, RecorderState, method } from '@vtex/api'
 import { Clients } from './clients'
-import { getSellerProducts, getSellerCountries, listSellerProducts, getSellerProductMedia, addSellerProductMedia, deleteSellerProductMedia, importSellerProducts, exportSellerProducts, getSellerPriceInventory, saveSellerPriceInventory, runPriceInventoryStep, proxySellerMediaDownload, serveSellerProductMedia, unpublishSellerProduct, getSellerEditLink, getSellerAddLink, getVtexProductStatusHandler, getSellerCatalogStatus } from './handlers/sellerProductsHandler'
+import { getSellerProducts, getSellerCountries, listSellerProducts, getSellerProductMedia, addSellerProductMedia, deleteSellerProductMedia, importSellerProducts, setSellerProductImportMetadata, exportSellerProducts, getSellerPriceInventory, saveSellerPriceInventory, runPriceInventoryStep, proxySellerMediaDownload, serveSellerProductMedia, unpublishSellerProduct, getSellerEditLink, getSellerAddLink, getVtexProductStatusHandler, getSellerCatalogStatus } from './handlers/sellerProductsHandler'
 import { getSellerDocuments, uploadSellerDocument, deleteSellerDocument } from './handlers/sellerDocumentsHandler'
 import { devReadSettings, devSaveSettings, devDeleteSettings } from './handlers/devSettingsHandler'
 import { catalogCapture, manualCapture, listMyProducts, captureEventLog, inspectProduct } from './handlers/productCaptureHandler'
@@ -44,6 +44,7 @@ export default new Service<Clients, State, ParamsContext>({
     sellerProductAddLink: method({ POST: [getSellerAddLink] }),
     sellerProductMedia: method({ GET: [getSellerProductMedia], POST: [addSellerProductMedia], DELETE: [deleteSellerProductMedia] }),
     sellerProductsImport: method({ POST: [importSellerProducts] }),
+    sellerProductImportMetadata: method({ POST: [setSellerProductImportMetadata] }),
     sellerProductsExport: method({ GET: [exportSellerProducts] }),
     sellerProductPriceInventory: method({ GET: [getSellerPriceInventory], POST: [saveSellerPriceInventory] }),
     sellerProductPriceInventoryStep: method({ POST: [runPriceInventoryStep] }),

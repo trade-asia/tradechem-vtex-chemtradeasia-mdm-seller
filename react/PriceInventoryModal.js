@@ -241,11 +241,34 @@ const PriceInventoryModal = ({ product, onClose }) => {
           setCategoriesDebug(data.categoriesDebug ?? null)
           setActiveTab(TABS_CREATE[0])
           fetchMedia()
+
+          // Prefill from CSV import (2026-10-24, explicit instruction):
+          // brand/category are only set when the backend found a name
+          // match against this seller's own live VTEX lists — an
+          // unmatched name is silently skipped here rather than forced
+          // into the dropdown. Everything else (EAN, dimensions, tax
+          // code) comes straight from what was typed in the CSV.
+          const prefill = data.importPrefill
+          if (prefill) {
+            if (prefill.brandId) setBrandId(String(prefill.brandId))
+            if (prefill.categoryId) setCategoryId(String(prefill.categoryId))
+            if (prefill.ean) setEan(String(prefill.ean))
+            if (prefill.taxCode) setTaxCode(String(prefill.taxCode))
+            if (prefill.packageWeight) setPackageWeight(String(prefill.packageWeight))
+            if (prefill.packageWidth) setPackageWidth(String(prefill.packageWidth))
+            if (prefill.packageHeight) setPackageHeight(String(prefill.packageHeight))
+            if (prefill.packageLength) setPackageLength(String(prefill.packageLength))
+          }
         }
-        setPrice(data.price ? String(data.price) : '')
-        setListPrice(data.listPrice ? String(data.listPrice) : '')
+        // data.price/listPrice/quantity (the linked-product path) take
+        // priority; data.importPrefill's own price/quantity (2026-10-24)
+        // are the fallback for a freshly-imported, not-yet-created
+        // product, so the CSV's price/quantity shows up here too instead
+        // of a blank form.
+        setPrice(data.price ? String(data.price) : (data.importPrefill?.price ? String(data.importPrefill.price) : ''))
+        setListPrice(data.listPrice ? String(data.listPrice) : (data.importPrefill?.listPrice ? String(data.importPrefill.listPrice) : ''))
         setWarehouseId(data.warehouseId || '')
-        setQuantity(data.quantity ? String(data.quantity) : '')
+        setQuantity(data.quantity ? String(data.quantity) : (data.importPrefill?.quantity ? String(data.importPrefill.quantity) : ''))
         setUnlimitedQuantity(!!data.unlimitedQuantity)
       })
       .catch(err => !cancelled && setLoadError(err.message))

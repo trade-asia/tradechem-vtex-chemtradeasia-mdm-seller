@@ -279,6 +279,63 @@ export async function findMarketplaceSuggestionByRefId(
   }
 }
 
+// Offer Manager — same api.vtex.com host as Suggestions above, also
+// scoped to the MARKETPLACE account (2026-10-24, explicit instruction:
+// always check this FIRST for the Published column, not as a last
+// resort). Confirmed via VTEX's own OpenAPI schema: reads from the live,
+// matched, active catalog, not the Suggestions review queue — so unlike
+// Suggestions it isn't affected by VTEX's Matcher removing an
+// auto-approved offer from that queue entirely, and it's the same data
+// source behind VTEX's own native "Offer Status" screen in the seller's
+// admin. Takes the MARKETPLACE's own product/SKU id, not any seller-side
+// id. Returns null if nothing is actively matched there yet.
+export async function getMarketplaceOfferManagerSku(
+  vtexAppKey: string,
+  vtexAppToken: string,
+  productId: string,
+  skuId: string
+): Promise<any | null> {
+  try {
+    const res = await axios.get(
+      `${pricingBaseUrl()}/offer-manager/pvt/product/${encodeURIComponent(productId)}/sku/${encodeURIComponent(skuId)}`,
+      { headers: authHeaders(vtexAppKey, vtexAppToken), timeout: 15000 }
+    )
+    const list: any[] = Array.isArray(res.data) ? res.data : []
+    return list[0] ?? null
+  } catch {
+    return null
+  }
+}
+
+// RefId-based product/SKU resolution on the MARKETPLACE's own catalog —
+// last-resort fallback (2026-10-24, explicit instruction) for a product
+// that's genuinely published but MDM's own vtex_product_id/vtex_sku_id
+// link fields were never updated to reflect it. Mirrors the marketplace
+// admin app's own resolveApprovedProduct/getSkuByRefId fix: the real path
+// is "stockkeepingunit**id**byrefid" (confirmed against VTEX's developer
+// docs — the "id" is easy to miss and a wrong guess here silently 404s
+// every call regardless of whether the SKU exists), and it returns only
+// the numeric id, not a full record, so getMarketplaceSku follows up for
+// the rest (same two-call pattern as the admin app fix).
+export async function getMarketplaceSkuByRefId(
+  vtexAppKey: string,
+  vtexAppToken: string,
+  refId: string
+): Promise<any | null> {
+  try {
+    const res = await axios.get(
+      `${baseUrl()}/api/catalog_system/pvt/sku/stockkeepingunitidbyrefid/${encodeURIComponent(refId)}`,
+      { headers: authHeaders(vtexAppKey, vtexAppToken), timeout: 15000 }
+    )
+    const id = typeof res.data === 'number' || typeof res.data === 'string' ? res.data : (res.data?.Id ?? res.data?.id)
+    if (id == null) return null
+    const sku = await getMarketplaceSku(vtexAppKey, vtexAppToken, Number(id))
+    return sku
+  } catch {
+    return null
+  }
+}
+
 export async function getMarketplaceVtexProductStatus(
   vtexAppKey: string,
   vtexAppToken: string,

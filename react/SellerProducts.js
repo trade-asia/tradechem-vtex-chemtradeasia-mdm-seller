@@ -13,7 +13,6 @@ const PER_PAGE = 20
 // here was touched (modals, handlers, state all still fully wired).
 const SHOW_MEDIA_DOCUMENTS_BUTTONS = false
 const DEBOUNCE_MS = 500
-const SAMPLE_CSV_URL = 'https://tradeasia.exchange/vtex-product-import-sample.csv'
 
 const STATUS_OPTIONS = [
   { value: '', label: 'All Statuses' },
@@ -363,72 +362,247 @@ const MediaModal = ({ product, onClose }) => {
 }
 
 // ── Import modal: upload a CSV, show per-row results. ──
+// Shared visual tokens for the import modal (2026-10-24, explicit
+// instruction: match the font/size/spacing polish already done on the
+// marketplace admin app's "Review Offer" modal) — muted uppercase labels,
+// a consistent light/dark color pair per row state, one accent color.
+const IMPORT_COLORS = {
+  text: '#17233d',
+  textMuted: '#64748b',
+  label: '#8a94a6',
+  border: '#e2e6ea',
+  bgSubtle: '#f8fafc',
+  primary: '#2563eb',
+  primaryBg: '#eff6ff',
+  primaryBorder: '#bfdbfe',
+  successBg: '#f0fdf4',
+  successBorder: '#86efac',
+  successText: '#166534',
+  dangerBg: '#fef2f2',
+  dangerBorder: '#fecaca',
+  dangerText: '#991b1b',
+  warningBg: '#fffbeb',
+  warningBorder: '#fde68a',
+  warningText: '#92400e',
+}
+
+// Mandatory alongside sku/name/cas_number/hs_code (2026-10-24, explicit
+// instruction) — brand/category/EAN/weight/dimensions/tax code/price/
+// quantity, the exact fields the Price & Inventory wizard's own "create
+// product in VTEX" step and price/inventory steps ask for. Captured as
+// metadata on import (see setSellerProductImportMetadata on the backend)
+// so Price & Inventory can prefill them later instead of making the
+// seller re-enter what they already put in the CSV. Brand/category are
+// free-text NAMES here, never VTEX's internal numeric ids — the seller
+// has no way to know those ids from a spreadsheet.
+const METADATA_COLUMNS = [
+  { key: 'brand', label: 'Brand' },
+  { key: 'category', label: 'Category' },
+  { key: 'ean', label: 'EAN' },
+  { key: 'package_weight', label: 'Package Weight' },
+  { key: 'package_width', label: 'Package Width' },
+  { key: 'package_height', label: 'Package Height' },
+  { key: 'package_length', label: 'Package Length' },
+  { key: 'tax_code', label: 'Tax Code' },
+  { key: 'price', label: 'Price' },
+  { key: 'quantity', label: 'Quantity' },
+]
+const BASE_REQUIRED_COLUMNS = [
+  { key: 'sku', label: 'SKU' },
+  { key: 'name', label: 'Name' },
+  { key: 'cas_number', label: 'CAS Number' },
+  { key: 'hs_code', label: 'HS Code' },
+]
+const ALL_REQUIRED_COLUMNS = [...BASE_REQUIRED_COLUMNS, ...METADATA_COLUMNS]
+
+// Generated client-side rather than linked to the external sample file
+// (2026-10-24) — that file lives outside this app's own repo and can't be
+// kept in sync with the current required-column set from here, so an
+// always-correct sample is built on the fly instead.
+function buildSampleCsvBlob() {
+  const header = ALL_REQUIRED_COLUMNS.map(c => c.key)
+  const example = [
+    'SAMPLE-SKU-001', 'Sample Chemical A', '104-76-7', '2905.16',
+    'Sample Brand', 'Sample Category', '1234567890123', '12', '10', '10', '10', '2905.16.00', '100', '50',
+  ]
+  return new Blob([serializeCsv([header, example])], { type: 'text/csv' })
+}
+
+const ImportErrorBadge = ({ message }) => {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  useEffect(() => {
+    if (!open) return
+    const onDocClick = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [open])
+  return (
+    <span ref={ref} style={{ position: 'relative', display: 'inline-flex', marginLeft: 6 }}>
+      <span
+        onClick={e => { e.stopPropagation(); setOpen(o => !o) }}
+        title="Click for details"
+        style={{
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          width: 15, height: 15, borderRadius: '50%', background: IMPORT_COLORS.dangerText, color: '#fff',
+          fontSize: 10, fontWeight: 700, lineHeight: 1, cursor: 'pointer', flexShrink: 0,
+        }}
+      >
+        !
+      </span>
+      {open && (
+        <div
+          style={{
+            position: 'absolute', top: '140%', left: 0, zIndex: 40,
+            background: IMPORT_COLORS.text, color: '#fff', fontSize: 11, lineHeight: 1.4,
+            padding: '8px 10px', borderRadius: 6, width: 260, textAlign: 'left',
+            boxShadow: '0 4px 14px rgba(0,0,0,0.25)',
+          }}
+        >
+          {message || 'Unknown error'}
+        </div>
+      )}
+    </span>
+  )
+}
+
+const IMPORT_ROW_STEP_LABELS = {
+  pending: 'Waiting…',
+  creating_product: 'Creating product…',
+  creating_metadata: 'Saving details…',
+  done: 'Done',
+}
+
 const ImportModal = ({ onClose, onImported }) => {
   const [file, setFile] = useState(null)
   const [checking, setChecking] = useState(false)
   const [importing, setImporting] = useState(false)
   const [error, setError] = useState(null)
-  const [result, setResult] = useState(null)
+  const [done, setDone] = useState(false)
   // Set once the pre-flight check finds SKUs already active or rejected —
   // holds what's needed to either re-upload as-is or rebuild the CSV with
   // those rows dropped, without re-parsing the file a second time.
-  const [conflict, setConflict] = useState(null) // { flagged: [{sku,name,status}], rows, skuColIndex }
+  const [conflict, setConflict] = useState(null) // { flagged: [{sku,name,status}], rows, header, colIndex }
+  // One entry per CSV data row, updated live as the import proceeds
+  // (2026-10-24, explicit instruction: real-time, step-by-step progress,
+  // not one big result dump at the end). header/csvRow are kept per row
+  // so the end-of-run error report can be built without re-parsing the
+  // file.
+  const [rows, setRows] = useState([]) // [{line, sku, name, status, error, header, csvRow}]
 
-  const upload = async (uploadFile) => {
-    setImporting(true)
-    setError(null)
-    try {
-      const form = new FormData()
-      form.append('csv_file', uploadFile)
-      const res = await fetch(`${BASE}/products/import`, { method: 'POST', body: form })
-      const data = await parseResponse(res)
-      if (!data.success) throw new Error(data.detail ? `${data.error}: ${data.detail}` : data.error)
-      setResult(data.result)
-      onImported()
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setImporting(false)
-    }
+  const updateRow = (i, patch) => {
+    setRows(prev => prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)))
   }
 
-  // Parses the CSV client-side, looks up each SKU's *current* status, and
-  // stops to warn before touching anything active or rejected — either way,
-  // the SKU resets to Pending Approval in both MDM and VTEX, so the seller
-  // should confirm first: active means something live gets delisted,
-  // rejected means it's being resubmitted for re-review.
+  // Runs the whole file one row at a time: each row gets its own
+  // single-row CSV POSTed to the SAME import endpoint MDM already
+  // validates/creates through (no new, unconfirmed MDM endpoint needed —
+  // the bulk endpoint already proves `sku` and every other column works,
+  // this just calls it with one data row instead of many), then, if that
+  // row has any metadata values, a follow-up call saves them. Both steps
+  // update that row's own status immediately, so the table reflects real
+  // progress rather than a single result at the very end.
+  const runImport = async (dataRows, header, colIndex) => {
+    setImporting(true)
+    setError(null)
+    const initial = dataRows.map((r, i) => ({
+      line: i + 2,
+      sku: (r[colIndex.sku] ?? '').trim(),
+      name: (r[colIndex.name] ?? '').trim(),
+      status: 'pending',
+      error: null,
+      header,
+      csvRow: r,
+    }))
+    setRows(initial)
+
+    for (let i = 0; i < dataRows.length; i++) {
+      const r = dataRows[i]
+      updateRow(i, { status: 'creating_product' })
+
+      let productResult
+      try {
+        const miniCsv = serializeCsv([header, r])
+        const miniFile = new File([miniCsv], 'row.csv', { type: 'text/csv' })
+        const form = new FormData()
+        form.append('csv_file', miniFile)
+        const res = await fetch(`${BASE}/products/import`, { method: 'POST', body: form })
+        productResult = await parseResponse(res)
+      } catch (err) {
+        productResult = { success: false, error: err.message }
+      }
+      if (!productResult.success) {
+        updateRow(i, { status: 'error', error: productResult.detail ? `${productResult.error}: ${productResult.detail}` : (productResult.error || 'Import failed') })
+        continue
+      }
+      const mdmRow = productResult.result?.products?.rows?.[0]
+      if (mdmRow && mdmRow.status === 'error') {
+        updateRow(i, { status: 'error', error: mdmRow.message || 'Import failed' })
+        continue
+      }
+
+      const metadata = {}
+      METADATA_COLUMNS.forEach(c => {
+        const v = (r[colIndex[c.key]] ?? '').trim()
+        if (v) metadata[c.key] = v
+      })
+
+      if (Object.keys(metadata).length) {
+        updateRow(i, { status: 'creating_metadata' })
+        try {
+          const sku = (r[colIndex.sku] ?? '').trim()
+          const lookupRes = await fetch(`${BASE}/products-list?sku=${encodeURIComponent(sku)}&per_page=20`)
+          const lookupData = await parseResponse(lookupRes)
+          const product = (lookupData.products ?? []).find(p => p.sku === sku)
+          if (!product) throw new Error("Product was created but couldn't be found again to save its details")
+          const metaRes = await fetch(`${BASE}/products/import-metadata`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mdmProductId: product.id, metadata }),
+          })
+          const metaData = await parseResponse(metaRes)
+          if (!metaData.success) throw new Error(metaData.detail ? `${metaData.error}: ${metaData.detail}` : metaData.error)
+        } catch (err) {
+          updateRow(i, { status: 'error', error: err.message })
+          continue
+        }
+      }
+
+      updateRow(i, { status: 'done', error: null })
+    }
+
+    setImporting(false)
+    setDone(true)
+    onImported()
+  }
+
+  // Parses the CSV client-side, checks every required column (base +
+  // metadata — all mandatory, 2026-10-24 explicit instruction) is present
+  // and filled, blocks duplicate SKUs within the file, then looks up each
+  // SKU's *current* status and stops to warn before touching anything
+  // active or rejected — either way the SKU resets to Pending Approval in
+  // both MDM and VTEX, so the seller should confirm first: active means
+  // something live gets delisted, rejected means it's being resubmitted.
   const handleImport = async () => {
     if (!file) return
     setChecking(true)
     setError(null)
     try {
       const text = await file.text()
-      const rows = parseCsv(text)
-      if (!rows.length) throw new Error('CSV file is empty')
-      const header = rows[0].map(h => h.trim().toLowerCase())
-      const skuColIndex = header.indexOf('sku')
-      if (skuColIndex === -1) throw new Error('CSV has no "sku" column')
+      const parsedRows = parseCsv(text)
+      if (!parsedRows.length) throw new Error('CSV file is empty')
+      const header = parsedRows[0].map(h => h.trim().toLowerCase())
+      const colIndex = {}
+      ALL_REQUIRED_COLUMNS.forEach(c => { colIndex[c.key] = header.indexOf(c.key) })
 
-      // MDM's bulk CSV endpoint doesn't reject rows missing these — it just
-      // accepts them silently (reported by the client: "CSV import accepts
-      // products with missing required information without throwing any
-      // information"). name/cas_number/hs_code are confirmed required
-      // elsewhere in this system (productCaptureHandler.ts's pre-validation,
-      // importProductHandler.ts), so block them here the same way blank SKU
-      // already is, rather than rely on MDM to catch it.
-      const REQUIRED_COLUMNS = [
-        { key: 'sku', colIndex: skuColIndex, label: 'SKU' },
-        { key: 'name', colIndex: header.indexOf('name'), label: 'Name' },
-        { key: 'cas_number', colIndex: header.indexOf('cas_number'), label: 'CAS Number' },
-        { key: 'hs_code', colIndex: header.indexOf('hs_code'), label: 'HS Code' },
-      ]
-      const missingColumns = REQUIRED_COLUMNS.filter(c => c.colIndex === -1)
+      const missingColumns = ALL_REQUIRED_COLUMNS.filter(c => colIndex[c.key] === -1)
       if (missingColumns.length) {
         throw new Error(`CSV is missing required column${missingColumns.length > 1 ? 's' : ''}: ${missingColumns.map(c => c.key).join(', ')}`)
       }
 
-      const rowErrors = rows.slice(1).map((r, i) => {
-        const missing = REQUIRED_COLUMNS.filter(c => !((r[c.colIndex] ?? '').trim())).map(c => c.label)
+      const dataRows = parsedRows.slice(1)
+      const rowErrors = dataRows.map((r, i) => {
+        const missing = ALL_REQUIRED_COLUMNS.filter(c => !((r[colIndex[c.key]] ?? '').trim())).map(c => c.label)
         return missing.length ? `line ${i + 2} (missing ${missing.join(', ')})` : null
       }).filter(Boolean)
       if (rowErrors.length) {
@@ -441,7 +615,7 @@ const ImportModal = ({ onClose, onImported }) => {
       // the first row created the product, the second quietly overwrote it
       // on the same import run with no warning (client-reported). Flag and
       // block instead of letting one row's data silently clobber another's.
-      const allSkus = rows.slice(1).map(r => (r[skuColIndex] ?? '').trim())
+      const allSkus = dataRows.map(r => (r[colIndex.sku] ?? '').trim())
       const skuLines = new Map()
       allSkus.forEach((sku, i) => {
         if (!skuLines.has(sku)) skuLines.set(sku, [])
@@ -451,7 +625,7 @@ const ImportModal = ({ onClose, onImported }) => {
       if (duplicateSkus.length) {
         const shown = duplicateSkus.slice(0, 10).map(([sku, lines]) => `${sku} (lines ${lines.join(', ')})`)
         const suffix = duplicateSkus.length > shown.length ? `; +${duplicateSkus.length - shown.length} more` : ''
-        throw new Error(`CSV has duplicate SKUs within the file — ${shown.join('; ')}${suffix}. Each SKU should appear once; remove or merge the duplicate rows before importing.`)
+        throw new Error(`CSV has duplicate SKUs within the file — ${shown.join('; ')}${suffix}. Each SKU should appear once; remove or merge the duplicate rows before importing. SKUs must be unique across the whole system — a duplicate SKU will not be imported.`)
       }
 
       const skus = [...new Set(allSkus)]
@@ -471,10 +645,10 @@ const ImportModal = ({ onClose, onImported }) => {
         .map(p => ({ sku: p.sku, name: p.name, status: p.status }))
 
       if (flagged.length) {
-        setConflict({ flagged, rows, skuColIndex })
+        setConflict({ flagged, rows: dataRows, header, colIndex })
         return
       }
-      await upload(file)
+      await runImport(dataRows, header, colIndex)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -483,71 +657,85 @@ const ImportModal = ({ onClose, onImported }) => {
   }
 
   const handleConfirmProceed = () => {
+    const { rows: dataRows, header, colIndex } = conflict
     setConflict(null)
-    upload(file)
+    runImport(dataRows, header, colIndex)
   }
 
   const handleConfirmSkip = () => {
-    const { flagged, rows, skuColIndex } = conflict
+    const { flagged, rows: dataRows, header, colIndex } = conflict
     const skipSet = new Set(flagged.map(s => s.sku))
-    const filteredRows = [rows[0], ...rows.slice(1).filter(r => !skipSet.has((r[skuColIndex] ?? '').trim()))]
-    const csvText = serializeCsv(filteredRows)
-    const filteredFile = new File([csvText], file.name, { type: file.type || 'text/csv' })
+    const filteredRows = dataRows.filter(r => !skipSet.has((r[colIndex.sku] ?? '').trim()))
     setConflict(null)
-    if (filteredRows.length <= 1) {
+    if (!filteredRows.length) {
       setError('Nothing left to import — every row in the file was already active or rejected.')
       return
     }
-    upload(filteredFile)
+    runImport(filteredRows, header, colIndex)
   }
 
-  const renderRows = (label, block) => {
-    if (!block?.rows?.length) return null
-    return (
-      <div style={{ marginBottom: 16 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: '#142032', marginBottom: 6 }}>
-          {label} — {block.summary?.create ?? 0} created, {block.summary?.update ?? 0} updated, {block.summary?.error ?? 0} errors
-        </div>
-        <div style={{ border: '1px solid #e0e4e8', borderRadius: 6, overflow: 'hidden', maxHeight: 220, overflowY: 'auto' }}>
-          {block.rows.map((r, i) => (
-            <div
-              key={i}
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '50px 1fr 80px 1fr',
-                gap: 8,
-                padding: '6px 10px',
-                borderBottom: '1px solid #eee',
-                fontSize: 12,
-                color: r.status === 'error' ? '#dc2626' : '#333',
-              }}
-            >
-              <span>{r.line}</span>
-              <span>{r.identifier}</span>
-              <span style={{ textTransform: 'uppercase', fontWeight: 700, fontSize: 10 }}>{r.status}</span>
-              <span>{r.message}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    )
+  // Original CSV + the outcome of each row appended, so a seller can fix
+  // just the failed rows and re-upload the same file (2026-10-24, explicit
+  // instruction).
+  const downloadReport = () => {
+    if (!rows.length) return
+    const header = [...rows[0].header, 'import_status', 'import_error']
+    const outRows = rows.map(r => [...r.csvRow, r.status, r.error ?? ''])
+    const blob = new Blob([serializeCsv([header, ...outRows])], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'import-report.csv'
+    a.click()
+    URL.revokeObjectURL(url)
   }
+
+  const downloadSample = () => {
+    const blob = buildSampleCsvBlob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'product-import-sample.csv'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const successCount = rows.filter(r => r.status === 'done').length
+  const errorCount = rows.filter(r => r.status === 'error').length
 
   return (
-    <Modal isOpen centered onClose={onClose} title="Import products">
-      <div style={{ minWidth: 600, maxWidth: 700 }}>
+    <Modal isOpen centered onClose={onClose} title="Import Products">
+      <div style={{ minWidth: 760, maxWidth: 860, fontFamily: 'inherit' }}>
         <div style={{
-          fontSize: 11, color: '#475569', background: '#f1f5f9', border: '1px solid #e2e8f0',
-          borderRadius: 4, padding: '6px 10px', marginBottom: 14,
+          fontSize: 12.5, color: IMPORT_COLORS.primary, background: IMPORT_COLORS.primaryBg,
+          border: `1px solid ${IMPORT_COLORS.primaryBorder}`, borderRadius: 8, padding: '12px 14px', marginBottom: 14,
+          lineHeight: 1.5,
         }}>
-          Every product created this way starts as <strong>Pending Approval</strong> until an MDM admin reviews it
+          Every product created this way starts as <strong>Pending Approval</strong> until a <strong>marketplace admin</strong> reviews it
           — re-uploading an existing SKU later to update it won't undo an approval already given.
         </div>
 
-        <div style={{ marginBottom: 12 }}>
-          <a href={SAMPLE_CSV_URL} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12 }}>
+        <div style={{
+          background: IMPORT_COLORS.bgSubtle, border: `1px solid ${IMPORT_COLORS.border}`, borderRadius: 8,
+          padding: '14px 16px', marginBottom: 16,
+        }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: IMPORT_COLORS.label, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
+            Before you upload
+          </div>
+          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, color: IMPORT_COLORS.text, lineHeight: 1.7 }}>
+            <li>SKU must be unique across the whole system — rows with a duplicate SKU will not be imported.</li>
+            <li>
+              Mandatory columns: <strong>sku, name, cas_number, hs_code</strong>, plus the metadata columns{' '}
+              <strong>{METADATA_COLUMNS.map(c => c.key).join(', ')}</strong> — all are required in the CSV.
+            </li>
+            <li>There are many other details you can add or update once the product exists in the system — the CSV only needs to cover the fields above to get started.</li>
+          </ul>
+          <button
+            onClick={downloadSample}
+            style={{ background: 'none', border: 'none', color: IMPORT_COLORS.primary, fontSize: 12, fontWeight: 600, cursor: 'pointer', padding: 0, marginTop: 10 }}
+          >
             Download sample CSV →
-          </a>
+          </button>
         </div>
 
         {conflict ? (() => {
@@ -555,8 +743,8 @@ const ImportModal = ({ onClose, onImported }) => {
           const rejectedFlagged = conflict.flagged.filter(s => s.status === 'rejected')
           return (
             <div style={{
-              fontSize: 12, color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a',
-              borderRadius: 6, padding: '12px 14px', marginBottom: 16,
+              fontSize: 12.5, color: IMPORT_COLORS.warningText, background: IMPORT_COLORS.warningBg,
+              border: `1px solid ${IMPORT_COLORS.warningBorder}`, borderRadius: 8, padding: '14px 16px', marginBottom: 16,
             }}>
               {activeFlagged.length > 0 && (
                 <div style={{ marginBottom: rejectedFlagged.length > 0 ? 14 : 8 }}>
@@ -593,7 +781,7 @@ const ImportModal = ({ onClose, onImported }) => {
               <div>Proceed and update everyone anyway, or skip just these SKUs and import the rest?</div>
             </div>
           )
-        })() : !result && (
+        })() : !rows.length && (
           <div style={{ marginBottom: 12 }}>
             <input
               type="file"
@@ -619,16 +807,63 @@ const ImportModal = ({ onClose, onImported }) => {
 
         {error && <div style={{ marginBottom: 12 }}><Alert type="error">{error}</Alert></div>}
 
-        {result && (
+        {rows.length > 0 && (
           <div>
-            <div style={{ marginBottom: 12 }}><Alert type="success">Import finished.</Alert></div>
-            {renderRows('Products', result.products)}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: IMPORT_COLORS.text }}>
+                {done
+                  ? `Import finished — ${successCount} created, ${errorCount} error${errorCount === 1 ? '' : 's'}`
+                  : `Importing… ${successCount + errorCount} of ${rows.length} done`}
+              </div>
+              {done && errorCount > 0 && (
+                <button
+                  onClick={downloadReport}
+                  style={{ background: 'none', border: 'none', color: IMPORT_COLORS.primary, fontSize: 12, fontWeight: 600, cursor: 'pointer', padding: 0 }}
+                >
+                  Download report (fix &amp; re-upload) →
+                </button>
+              )}
+            </div>
+            <div style={{ border: `1px solid ${IMPORT_COLORS.border}`, borderRadius: 8, overflow: 'hidden', maxHeight: 320, overflowY: 'auto' }}>
+              <div style={{
+                display: 'grid', gridTemplateColumns: '40px 1fr 1fr 170px', gap: 8, padding: '8px 12px',
+                fontSize: 10, fontWeight: 700, color: IMPORT_COLORS.label, textTransform: 'uppercase', letterSpacing: '0.05em',
+                background: IMPORT_COLORS.bgSubtle, borderBottom: `1px solid ${IMPORT_COLORS.border}`,
+                position: 'sticky', top: 0,
+              }}>
+                <span>Line</span><span>SKU</span><span>Name</span><span>Status</span>
+              </div>
+              {rows.map((r, i) => {
+                const isSuccess = r.status === 'done'
+                const isError = r.status === 'error'
+                const bg = isSuccess ? IMPORT_COLORS.successBg : isError ? IMPORT_COLORS.dangerBg : '#fff'
+                const fg = isSuccess ? IMPORT_COLORS.successText : isError ? IMPORT_COLORS.dangerText : IMPORT_COLORS.text
+                return (
+                  <div
+                    key={i}
+                    style={{
+                      display: 'grid', gridTemplateColumns: '40px 1fr 1fr 170px', gap: 8, padding: '8px 12px',
+                      borderBottom: `1px solid ${IMPORT_COLORS.border}`, fontSize: 12.5, background: bg, color: fg,
+                      alignItems: 'center',
+                    }}
+                  >
+                    <span style={{ color: IMPORT_COLORS.label }}>{r.line}</span>
+                    <span style={{ fontFamily: 'monospace' }}>{r.sku || '—'}</span>
+                    <span>{r.name || '—'}</span>
+                    <span style={{ display: 'flex', alignItems: 'center', fontWeight: 600 }}>
+                      {isError ? 'Error' : isSuccess ? 'Done' : IMPORT_ROW_STEP_LABELS[r.status]}
+                      {isError && <ImportErrorBadge message={r.error} />}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
           </div>
         )}
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
           <Button variation="tertiary" onClick={conflict ? () => setConflict(null) : onClose}>
-            {result ? 'Close' : 'Cancel'}
+            {done ? 'Close' : 'Cancel'}
           </Button>
           {conflict && (
             <>
@@ -640,7 +875,7 @@ const ImportModal = ({ onClose, onImported }) => {
               </Button>
             </>
           )}
-          {!result && !conflict && (
+          {!rows.length && !conflict && (
             <Button variation="primary" onClick={handleImport} isLoading={checking || importing} disabled={!file}>
               Import
             </Button>
@@ -858,9 +1093,16 @@ const SellerProducts = () => {
   // explicit instruction: no N calls to MDM on page load, check the
   // seller's own catalog directly instead). Drives both the Price &
   // Inventory button color (inSellerCatalog) and the Published column's
-  // real offer state (offerState: not_submitted/processing/pending/
-  // rejected/approved — "approved" vs "published" is decided below by
-  // also folding in the existing liveStatus IsActive check).
+  // real offer state — fully resolved server-side now (2026-10-24,
+  // explicit instruction): offerState already IS the final answer
+  // (not_submitted/processing/pending/rejected/approved/published), no
+  // longer combined with the separate liveStatus check on the frontend.
+  // That combination used to race this effect against the liveStatus one
+  // (two independent, uncoordinated checks), which is exactly what made
+  // the label flip between "published" and "approved" on refresh —
+  // eliminated by making this one server call the single source of
+  // truth, checking Offer Manager first every time (see
+  // getSellerCatalogStatus's own note on why).
   useEffect(() => {
     let cancelled = false
     const toCheck = products.filter(p => p.sku && catalogStatus[p.sku] === undefined)
@@ -871,7 +1113,10 @@ const SellerProducts = () => {
         if (cancelled) return
         setCatalogStatus(s => ({ ...s, [p.sku]: 'loading' }))
         try {
-          const res = await fetch(`${BASE}/products/seller-catalog-status?mdmSku=${encodeURIComponent(p.sku)}`)
+          const params = new URLSearchParams({ mdmSku: p.sku })
+          if (p.vtex?.vtex_product_id) params.set('marketplaceProductId', String(p.vtex.vtex_product_id))
+          if (p.vtex?.vtex_sku_id) params.set('marketplaceSkuId', String(p.vtex.vtex_sku_id))
+          const res = await fetch(`${BASE}/products/seller-catalog-status?${params.toString()}`)
           const data = await parseResponse(res)
           if (cancelled) return
           setCatalogStatus(s => ({
@@ -1277,14 +1522,17 @@ const SellerProducts = () => {
             const rowLiveStatus = p.vtex?.linked ? liveStatus[p.vtex?.vtex_product_id] : undefined
             const isChecking = p.vtex?.linked && (rowLiveStatus === undefined || rowLiveStatus === 'loading')
             const isPublished = p.vtex?.linked && rowLiveStatus === true
-            // Real offer status — see catalogStatus's own progressive-check
-            // effect and OFFER_STATE_DISPLAY above (2026-10-24, explicit
-            // instruction).
+            // Real offer status — fully resolved server-side (2026-10-24,
+            // explicit instruction: Offer Manager checked first, always;
+            // see getSellerCatalogStatus's own note). Used directly, not
+            // combined with the separate liveStatus/isPublished check
+            // below (that combination is what caused the "published" vs
+            // "approved" flip-flop on refresh — two uncoordinated checks
+            // racing each other).
             const rowCatalogStatus = catalogStatus[p.sku]
             const catalogChecking = rowCatalogStatus === undefined || rowCatalogStatus === 'loading'
             const inSellerCatalog = typeof rowCatalogStatus === 'object' && !!rowCatalogStatus.inSellerCatalog
-            const rawOfferState = typeof rowCatalogStatus === 'object' ? rowCatalogStatus.offerState : undefined
-            const offerState = rawOfferState === 'approved' && isPublished ? 'published' : rawOfferState
+            const offerState = typeof rowCatalogStatus === 'object' ? rowCatalogStatus.offerState : undefined
             // Edit/Revert to Pending default to hidden while the live check
             // is still in flight, so they never flash on then immediately
             // disappear once the real state comes back. Once resolved:

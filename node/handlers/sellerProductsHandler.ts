@@ -17,6 +17,8 @@ import {
   getMarketplaceBrandMap,
   getMarketplaceWarehouseMap,
   findMarketplaceSuggestionByRefId,
+  getMarketplaceOfferManagerSku,
+  getMarketplaceSkuByRefId,
 } from '../helpers/marketplaceVtexClient'
 
 async function readSettings(ctx: ServiceContext<Clients>): Promise<any | null> {
@@ -461,9 +463,42 @@ function isRejectedOfferStatus(status?: string | null): boolean {
 // replaces. Once the seller's own product/SKU is found this way, also
 // resolves the real offer status from the Suggestions API in the same
 // call, since both need the same sellerSid this lookup already produces.
+// Priority order rebuilt (2026-10-24, explicit instruction, after the old
+// Suggestions-first design produced two symptoms: the label flip-flopping
+// between "published" and "approved" on refresh — caused by this and the
+// separate liveStatus check racing each other as two uncoordinated
+// frontend effects — and some rows stuck on "processing" forever despite
+// being genuinely published, because VTEX's Matcher removes an
+// auto-approved Suggestion from its review queue entirely once resolved
+// (see the marketplace admin app's own receivedSkuHandler.ts, which hit
+// this same thing first). Both are fixed by making this ONE server-side
+// call the single source of truth, checked in this exact order:
+//
+//   1. Offer Manager, ALWAYS first — maps to VTEX's own native "Offer
+//      Status" screen's Published tab (confirmed via its own OpenAPI
+//      description: reads the live, matched, active catalog, not the
+//      Suggestions queue, so it isn't affected by the queue-removal gap
+//      above). A match there plus one live IsActive re-check is enough
+//      to call it "published" outright — Suggestions is never even
+//      consulted in that case.
+//   2. Not confirmed published — Suggestions, for Pending/Rejected/
+//      Approved (maps to the native screen's Issues — Rejected — and
+//      Awaiting Completion — Pending/Approved — tabs).
+//   3. Still nothing, AND MDM never recorded a marketplace link at all —
+//      last resort: resolve the marketplace product independently by
+//      this SKU's own RefId and try Offer Manager once more with the ids
+//      found that way, for the case where the product is genuinely
+//      published but MDM's own link field was never updated to reflect
+//      it.
 export async function getSellerCatalogStatus(ctx: ServiceContext<Clients>) {
   ctx.status = 200
   const mdmSku = (ctx.query as any).mdmSku as string | undefined
+  // The product's known marketplace link from MDM, if any
+  // (product.vtex.vtex_product_id/vtex_sku_id) — passed in by the
+  // frontend so step 1 can run immediately with the real ids, no
+  // resolution needed first.
+  const marketplaceProductId = (ctx.query as any).marketplaceProductId as string | undefined
+  const marketplaceSkuId = (ctx.query as any).marketplaceSkuId as string | undefined
   if (!mdmSku) {
     ctx.body = { success: false, error: 'mdmSku is required' }
     return
@@ -496,19 +531,50 @@ export async function getSellerCatalogStatus(ctx: ServiceContext<Clients>) {
     try { settings = await readMdmConfig(ctx) } catch {}
     const { vtexAppKey, vtexAppToken } = settings ?? {}
     if (vtexAppKey && vtexAppToken) {
-      // Searched by RefId against the Suggestions LIST, not a direct GET
-      // keyed on sellerSid (2026-10-24: the Seller Portal Catalog API's own
-      // SKU id and the Suggestions API's SellerStockKeepingUnitId are two
-      // different id spaces — not guaranteed to be the same number, and
-      // assuming so silently 404'd this lookup even for a genuinely
-      // published offer). Status is read straight off the matched
-      // suggestion itself.
-      const suggestion = await findMarketplaceSuggestionByRefId(vtexAppKey, vtexAppToken, ctx.vtex.account, mdmSku)
-      if (!suggestion) {
-        offerState = 'processing'
+      let publishedConfirmed = false
+
+      // Step 1 — Offer Manager first, always.
+      if (marketplaceProductId && marketplaceSkuId) {
+        const offer = await getMarketplaceOfferManagerSku(vtexAppKey, vtexAppToken, marketplaceProductId, marketplaceSkuId)
+        if (offer) {
+          const status = await getMarketplaceVtexProductStatus(vtexAppKey, vtexAppToken, marketplaceProductId)
+          if (status.success && status.isActive) publishedConfirmed = true
+        }
+      }
+
+      if (publishedConfirmed) {
+        offerState = 'published'
       } else {
-        const status = suggestion.Status ?? suggestion.status
-        offerState = isRejectedOfferStatus(status) ? 'rejected' : isPendingOfferStatus(status) ? 'pending' : 'approved'
+        // Step 2 — Suggestions, searched by RefId against the LIST, not a
+        // direct GET keyed on sellerSid (2026-10-24: the Seller Portal
+        // Catalog API's own SKU id and the Suggestions API's
+        // SellerStockKeepingUnitId are two different id spaces — not
+        // guaranteed to be the same number). Status is read straight off
+        // the matched suggestion itself.
+        const suggestion = await findMarketplaceSuggestionByRefId(vtexAppKey, vtexAppToken, ctx.vtex.account, mdmSku)
+        if (suggestion) {
+          const status = suggestion.Status ?? suggestion.status
+          offerState = isRejectedOfferStatus(status) ? 'rejected' : isPendingOfferStatus(status) ? 'pending' : 'approved'
+        } else if (!marketplaceProductId) {
+          // Step 3 — last resort, only when MDM never recorded a
+          // marketplace link at all.
+          const marketplaceSku = await getMarketplaceSkuByRefId(vtexAppKey, vtexAppToken, mdmSku)
+          const resolvedProductId = marketplaceSku ? String(pick(marketplaceSku, 'ProductId', 'productId')) : null
+          const resolvedSkuId = marketplaceSku ? String(pick(marketplaceSku, 'Id', 'id')) : null
+          if (resolvedProductId && resolvedSkuId) {
+            const offer = await getMarketplaceOfferManagerSku(vtexAppKey, vtexAppToken, resolvedProductId, resolvedSkuId)
+            if (offer) {
+              const status = await getMarketplaceVtexProductStatus(vtexAppKey, vtexAppToken, resolvedProductId)
+              offerState = (status.success && status.isActive) ? 'published' : 'processing'
+            }
+            // else: genuinely nothing found anywhere for this SKU beyond
+            // existing in the seller's own catalog — stays 'processing',
+            // the already-initialized default.
+          }
+        }
+        // else (marketplaceProductId was known but neither Offer Manager
+        // nor Suggestions had anything): also stays 'processing' —
+        // genuinely ambiguous, not worth a special state for.
       }
     }
   } catch {
@@ -882,16 +948,55 @@ export async function getSellerPriceInventory(ctx: ServiceContext<Clients>) {
   const brandsAllInactive = brandsResult.items.length > 0
     && !brandsResult.items.some((b: any) => (b.isActive ?? b.IsActive) === true)
 
+  const finalBrands = brandsResult.items
+    .filter((b: any) => brandsAllInactive || (b.isActive ?? b.IsActive) !== false)
+    .map((b: any) => ({ id: String(b.id ?? b.Id), name: b.name ?? b.Name }))
+
+  // Prefill from CSV import (2026-10-24, explicit instruction): if this
+  // product was created via the CSV importer and had brand/category/EAN/
+  // weight/dimensions/tax code/price/quantity captured as metadata (see
+  // setSellerProductImportMetadata), surface it here so the creation form
+  // doesn't make the seller re-enter what they already put in the CSV.
+  // Brand/category are matched by NAME against this seller's own live
+  // VTEX lists (not stored as ids — the CSV only ever has human-readable
+  // names, never VTEX's internal numeric ids) — a match pre-selects the
+  // right dropdown option; no match still shows the raw text so the
+  // seller can pick the closest one themselves.
+  const importDetails = pick(metadata, IMPORT_DETAILS_METADATA_KEY)
+  let importPrefill: any = null
+  if (importDetails) {
+    const brandMatch = importDetails.brand
+      ? finalBrands.find(b => b.name?.trim().toLowerCase() === String(importDetails.brand).trim().toLowerCase())
+      : null
+    const categoryMatch = importDetails.category
+      ? flatCategories.find(c => c.name.replace(/^(— )+/, '').trim().toLowerCase() === String(importDetails.category).trim().toLowerCase())
+      : null
+    importPrefill = {
+      brandId: brandMatch?.id ?? null,
+      brandName: importDetails.brand ?? null,
+      categoryId: categoryMatch?.id ?? null,
+      categoryName: importDetails.category ?? null,
+      ean: importDetails.ean ?? null,
+      packageWeight: importDetails.package_weight ?? null,
+      packageWidth: importDetails.package_width ?? null,
+      packageHeight: importDetails.package_height ?? null,
+      packageLength: importDetails.package_length ?? null,
+      taxCode: importDetails.tax_code ?? null,
+      price: importDetails.price ?? null,
+      listPrice: importDetails.list_price ?? null,
+      quantity: importDetails.quantity ?? null,
+    }
+  }
+
   ctx.body = {
     success: true,
     linked: false,
-    brands: brandsResult.items
-      .filter((b: any) => brandsAllInactive || (b.isActive ?? b.IsActive) !== false)
-      .map((b: any) => ({ id: String(b.id ?? b.Id), name: b.name ?? b.Name })),
+    brands: finalBrands,
     brandsDebug,
     categories: flatCategories,
     categoriesDebug,
     warehouses: warehouses.map((w: any) => ({ id: w.id, name: w.name })),
+    importPrefill,
   }
 }
 
@@ -1498,6 +1603,45 @@ function appendMultipartField(body: Buffer, boundary: string, name: string, valu
     `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`
   )
   return Buffer.concat([body.slice(0, idx), field, body.slice(idx)])
+}
+
+// POST /_v/mdm-seller/products/import-metadata
+// Body: { mdmProductId, metadata }
+// Stores CSV-import-supplied product details (brand/category/EAN/weight/
+// dimensions/tax code/price/quantity — 2026-10-24, explicit instruction)
+// under their own ImportDetails key in MDM's product metadata, so the
+// Price & Inventory modal can read them back later and prefill its
+// creation form. Read-merge-write, same pattern as every other metadata
+// write in this file — only the ImportDetails key is touched, everything
+// else already in the record (SellerDashboard, any legacy key) is passed
+// through untouched.
+const IMPORT_DETAILS_METADATA_KEY = 'ImportDetails'
+
+export async function setSellerProductImportMetadata(ctx: ServiceContext<Clients>) {
+  ctx.status = 200
+  const raw = await readBody(ctx)
+  let parsed: any = {}
+  try { parsed = JSON.parse(raw) } catch {}
+
+  const { mdmProductId, metadata } = parsed
+  if (!mdmProductId || !metadata || typeof metadata !== 'object') {
+    ctx.body = { success: false, error: 'mdmProductId and metadata are required' }
+    return
+  }
+
+  const auth = await mdmAuth(ctx)
+  if (!auth) return
+
+  try {
+    const current = (await withAuthRetry(ctx, auth, a => ctx.clients.mdm.getProductMetadata(a.token, mdmProductId))) ?? {}
+    await withAuthRetry(ctx, auth, a => ctx.clients.mdm.setProductMetadata(a.token, mdmProductId, {
+      ...current,
+      [IMPORT_DETAILS_METADATA_KEY]: metadata,
+    }))
+    ctx.body = { success: true }
+  } catch (err: any) {
+    ctx.body = { success: false, error: 'Failed to save import details to MDM', detail: mdmErrDetail(err) }
+  }
 }
 
 // POST /_v/mdm-seller/products/import — multipart CSV, forwarded to MDM
