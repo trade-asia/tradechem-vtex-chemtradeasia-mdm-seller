@@ -1,7 +1,7 @@
 {
   "vendor": "tradeasiab2b",
   "name": "chemtradeasia-mdm-seller",
-  "version": "1.4.76",
+  "version": "1.4.77",
   "title": "MDM Seller Integration",
   "description": "Seller-facing ChemTradeAsia MDM integration: view your synced products and their Tradechem link status, and manage your MDM subscription plan.",
   "defaultLocale": "en-US",

@@ -440,7 +440,6 @@ const ImportErrorBadge = ({ message }) => {
   const [pos, setPos] = useState(null)
   const iconRef = useRef(null)
   const tooltipRef = useRef(null)
-  const width = 280
 
   useEffect(() => {
     if (!open) return
@@ -448,8 +447,14 @@ const ImportErrorBadge = ({ message }) => {
       const el = iconRef.current
       if (!el) return
       const rect = el.getBoundingClientRect()
-      const left = Math.min(Math.max(12, rect.left + rect.width / 2 - width / 2), window.innerWidth - width - 12)
-      setPos({ top: rect.bottom + 9, left, arrowLeft: rect.left + rect.width / 2 - left })
+      // document.documentElement.clientWidth, not window.innerWidth — this
+      // app renders inside a VS Code webview/VTEX admin iframe, where the
+      // two can disagree, which was letting this spill past the real
+      // visible edge (2026-10-25, explicit instruction).
+      const vw = document.documentElement.clientWidth
+      const width = Math.min(280, vw - 24)
+      const left = Math.min(Math.max(12, rect.left + rect.width / 2 - width / 2), vw - width - 12)
+      setPos({ top: rect.bottom + 9, left, width, arrowLeft: rect.left + rect.width / 2 - left })
     }
     update()
     window.addEventListener('scroll', update, true)
@@ -485,7 +490,7 @@ const ImportErrorBadge = ({ message }) => {
         <div
           ref={tooltipRef}
           style={{
-            position: 'fixed', top: pos.top, left: pos.left, width, zIndex: 10002,
+            position: 'fixed', top: pos.top, left: pos.left, width: pos.width, zIndex: 10002,
             background: '#1f2430', color: '#f8fafc', fontSize: 12.5, fontWeight: 500, lineHeight: 1.55,
             padding: '11px 14px', borderRadius: 8, textAlign: 'left',
             borderLeft: `3px solid ${IMPORT_COLORS.dangerText}`,
@@ -494,7 +499,7 @@ const ImportErrorBadge = ({ message }) => {
         >
           <div
             style={{
-              position: 'absolute', top: -5, left: Math.min(Math.max(10, pos.arrowLeft - 5), width - 20),
+              position: 'absolute', top: -5, left: Math.min(Math.max(10, pos.arrowLeft - 5), pos.width - 20),
               width: 10, height: 10, background: '#1f2430', transform: 'rotate(45deg)',
               borderTop: '1px solid rgba(255,255,255,0.06)', borderLeft: '1px solid rgba(255,255,255,0.06)',
             }}
@@ -1053,17 +1058,25 @@ const TourOverlay = ({ step, onStepChange, hasProducts }) => {
     pointerEvents: 'none',
     zIndex: 10000,
   }
-  const spaceBelow = window.innerHeight - rect.bottom
+  // document.documentElement.clientWidth/Height, not window.innerWidth/
+  // Height — this app renders inside a VS Code webview/VTEX admin iframe,
+  // where the two can disagree; clientWidth/Height always matches the
+  // actual visible document the tooltip is portaled into (2026-10-25,
+  // explicit instruction: keep the tooltip inside the real viewport).
+  const vw = document.documentElement.clientWidth
+  const vh = document.documentElement.clientHeight
+  const tooltipWidth = Math.min(320, vw - 24)
+  const spaceBelow = vh - rect.bottom
   const tooltipTop = spaceBelow > 180
     ? rect.bottom + pad * 2 + 8
     : Math.max(12, rect.top - pad * 2 - 160)
-  const tooltipLeft = Math.min(Math.max(12, rect.left), window.innerWidth - 332)
+  const tooltipLeft = Math.min(Math.max(12, rect.left), vw - tooltipWidth - 12)
 
   return ReactDOM.createPortal(
     <>
       <div style={spotlightStyle} />
       <div style={{
-        position: 'fixed', top: tooltipTop, left: tooltipLeft, width: 320,
+        position: 'fixed', top: tooltipTop, left: tooltipLeft, width: tooltipWidth,
         background: '#fff', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
         padding: 16, zIndex: 10001, fontFamily: 'inherit',
       }}>
