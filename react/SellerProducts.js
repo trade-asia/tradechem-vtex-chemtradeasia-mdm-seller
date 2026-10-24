@@ -428,18 +428,49 @@ function buildSampleCsvBlob() {
   return new Blob([serializeCsv([header, example])], { type: 'text/csv' })
 }
 
+// Portal-rendered to document.body (2026-10-25, explicit instruction) —
+// the badge lives inside the import rows list, which scrolls inside a
+// fixed-height container (see ImportModal); an absolutely-positioned
+// tooltip anchored to that ancestor was getting clipped by the container's
+// own overflow the moment it scrolled. Positioning off the icon's real
+// getBoundingClientRect, fixed, and re-measured on scroll/resize keeps it
+// anchored and always fully visible regardless of scroll position.
 const ImportErrorBadge = ({ message }) => {
   const [open, setOpen] = useState(false)
-  const ref = useRef(null)
+  const [pos, setPos] = useState(null)
+  const iconRef = useRef(null)
+  const tooltipRef = useRef(null)
+  const width = 280
+
   useEffect(() => {
     if (!open) return
-    const onDocClick = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    const update = () => {
+      const el = iconRef.current
+      if (!el) return
+      const rect = el.getBoundingClientRect()
+      const left = Math.min(Math.max(12, rect.left + rect.width / 2 - width / 2), window.innerWidth - width - 12)
+      setPos({ top: rect.bottom + 9, left, arrowLeft: rect.left + rect.width / 2 - left })
+    }
+    update()
+    window.addEventListener('scroll', update, true)
+    window.addEventListener('resize', update)
+    const onDocClick = e => {
+      if (iconRef.current?.contains(e.target)) return
+      if (tooltipRef.current?.contains(e.target)) return
+      setOpen(false)
+    }
     document.addEventListener('mousedown', onDocClick)
-    return () => document.removeEventListener('mousedown', onDocClick)
+    return () => {
+      window.removeEventListener('scroll', update, true)
+      window.removeEventListener('resize', update)
+      document.removeEventListener('mousedown', onDocClick)
+    }
   }, [open])
+
   return (
-    <span ref={ref} style={{ position: 'relative', display: 'inline-flex', marginLeft: 6 }}>
+    <span style={{ position: 'relative', display: 'inline-flex', marginLeft: 6 }}>
       <span
+        ref={iconRef}
         onClick={e => { e.stopPropagation(); setOpen(o => !o) }}
         title="Click for details"
         style={{
@@ -450,17 +481,27 @@ const ImportErrorBadge = ({ message }) => {
       >
         !
       </span>
-      {open && (
+      {open && pos && ReactDOM.createPortal(
         <div
+          ref={tooltipRef}
           style={{
-            position: 'absolute', top: '140%', left: 0, zIndex: 40,
-            background: IMPORT_COLORS.text, color: '#fff', fontSize: 11, lineHeight: 1.4,
-            padding: '8px 10px', borderRadius: 6, width: 260, textAlign: 'left',
-            boxShadow: '0 4px 14px rgba(0,0,0,0.25)',
+            position: 'fixed', top: pos.top, left: pos.left, width, zIndex: 10002,
+            background: '#1f2430', color: '#f8fafc', fontSize: 12.5, fontWeight: 500, lineHeight: 1.55,
+            padding: '11px 14px', borderRadius: 8, textAlign: 'left',
+            borderLeft: `3px solid ${IMPORT_COLORS.dangerText}`,
+            boxShadow: '0 12px 28px rgba(15,23,42,0.4)',
           }}
         >
+          <div
+            style={{
+              position: 'absolute', top: -5, left: Math.min(Math.max(10, pos.arrowLeft - 5), width - 20),
+              width: 10, height: 10, background: '#1f2430', transform: 'rotate(45deg)',
+              borderTop: '1px solid rgba(255,255,255,0.06)', borderLeft: '1px solid rgba(255,255,255,0.06)',
+            }}
+          />
           {message || 'Unknown error'}
-        </div>
+        </div>,
+        document.body
       )}
     </span>
   )
