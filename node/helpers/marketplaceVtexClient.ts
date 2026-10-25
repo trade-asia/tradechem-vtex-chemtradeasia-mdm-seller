@@ -279,16 +279,27 @@ export async function findMarketplaceSuggestionByRefId(
   }
 }
 
-// Offer Manager — same api.vtex.com host as Suggestions above, also
-// scoped to the MARKETPLACE account (2026-10-24, explicit instruction:
-// always check this FIRST for the Published column, not as a last
-// resort). Confirmed via VTEX's own OpenAPI schema: reads from the live,
-// matched, active catalog, not the Suggestions review queue — so unlike
-// Suggestions it isn't affected by VTEX's Matcher removing an
-// auto-approved offer from that queue entirely, and it's the same data
-// source behind VTEX's own native "Offer Status" screen in the seller's
-// admin. Takes the MARKETPLACE's own product/SKU id, not any seller-side
-// id. Returns null if nothing is actively matched there yet.
+// Offer Manager — a DIFFERENT host than Suggestions above (2026-10-25,
+// confirmed live via the marketplace admin app's own identical bug and
+// fix): Offer Manager and Seller Register both live in VTEX's
+// "Marketplace APIs.json" schema, whose server is the account-scoped
+// vtexcommercestable.com.br host — not api.vtex.com, which only
+// Suggestions (its own separate schema file) actually needs. Calling it
+// on the wrong host returns an HTTP 400 HTML gateway error page, not
+// JSON, which this function's own catch-all silently turned into "no
+// match" — exactly why Published kept showing "not submitted" for
+// offers that were genuinely already live (confirmed live 2026-10-25:
+// Sample Chemical A, auto-approved via VTEX's Matcher, no Suggestions
+// record at all, so this was the only path that could have found it).
+// Always check this FIRST for the Published column, not as a last
+// resort (2026-10-24, explicit instruction). Confirmed via VTEX's own
+// OpenAPI schema: reads from the live, matched, active catalog, not the
+// Suggestions review queue — so unlike Suggestions it isn't affected by
+// VTEX's Matcher removing an auto-approved offer from that queue
+// entirely, and it's the same data source behind VTEX's own native
+// "Offer Status" screen in the seller's admin. Takes the MARKETPLACE's
+// own product/SKU id, not any seller-side id. Returns null if nothing
+// is actively matched there yet.
 export async function getMarketplaceOfferManagerSku(
   vtexAppKey: string,
   vtexAppToken: string,
@@ -297,7 +308,7 @@ export async function getMarketplaceOfferManagerSku(
 ): Promise<any | null> {
   try {
     const res = await axios.get(
-      `${pricingBaseUrl()}/offer-manager/pvt/product/${encodeURIComponent(productId)}/sku/${encodeURIComponent(skuId)}`,
+      `${baseUrl()}/api/offer-manager/pvt/product/${encodeURIComponent(productId)}/sku/${encodeURIComponent(skuId)}`,
       { headers: authHeaders(vtexAppKey, vtexAppToken), timeout: 15000 }
     )
     const list: any[] = Array.isArray(res.data) ? res.data : []
